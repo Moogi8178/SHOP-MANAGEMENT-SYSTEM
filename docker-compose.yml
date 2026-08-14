@@ -1,0 +1,15 @@
+version: "3.8"
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ekambi
+      POSTGRES_PASSWORD: ekambi
+      POSTGRES_DB: ekambi_hardware
+    ports:
+      - "5432:5432"
+    volumes:
+      - ekambi_pg_data:/var/lib/postgresql/data
+volumes:
+  ekambi_pg_data:
