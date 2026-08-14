@@ -1,0 +1,11 @@
+{
+  "name": "ekambi-hardware",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npm install --prefix client && npm run build --prefix client && npm install --prefix server",
+    "start": "node server/index.js",
+    "dev:server": "node server/index.js",
+    "dev:client": "npm run dev --prefix client"
+  }
+}
