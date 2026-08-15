@@ -273,8 +273,8 @@ function SalesHistory({ sales, adminToken, onChanged, onAuthFail }) {
   const summary = useMemo(() => {
     const s = { cash: 0, till: 0, debt: 0, total: 0, count: filtered.length };
     for (const sale of filtered) {
-      s[sale.paymentMethod || "cash"] = (s[sale.paymentMethod || "cash"] || 0) + sale.total;
-      s.total += sale.total;
+      s[sale.paymentMethod || "cash"] = (s[sale.paymentMethod || "cash"] || 0) + sale.netTotal;
+      s.total += sale.netTotal;
     }
     return s;
   }, [filtered]);
@@ -775,9 +775,10 @@ function Dashboard({ products, sales }) {
     let revenue = 0, cost = 0, itemsSold = 0;
     for (const s of sales) {
       for (const it of s.items) {
-        revenue += it.sellPrice * it.qty;
-        cost += it.costPrice * it.qty;
-        itemsSold += it.qty;
+        const effQty = it.qty - (it.returnedQty || 0);
+        revenue += it.sellPrice * effQty;
+        cost += it.costPrice * effQty;
+        itemsSold += effQty;
       }
     }
     const profit = revenue - cost;
@@ -791,8 +792,9 @@ function Dashboard({ products, sales }) {
       const k = dateKey(s.timestamp);
       byDay[k] = byDay[k] || { day: k, revenue: 0, profit: 0 };
       for (const it of s.items) {
-        byDay[k].revenue += it.sellPrice * it.qty;
-        byDay[k].profit += (it.sellPrice - it.costPrice) * it.qty;
+        const effQty = it.qty - (it.returnedQty || 0);
+        byDay[k].revenue += it.sellPrice * effQty;
+        byDay[k].profit += (it.sellPrice - it.costPrice) * effQty;
       }
     }
     return Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day)).slice(-14);
@@ -802,9 +804,10 @@ function Dashboard({ products, sales }) {
     const byName = {};
     for (const s of sales) {
       for (const it of s.items) {
+        const effQty = it.qty - (it.returnedQty || 0);
         byName[it.name] = byName[it.name] || { name: it.name, revenue: 0, qty: 0 };
-        byName[it.name].revenue += it.sellPrice * it.qty;
-        byName[it.name].qty += it.qty;
+        byName[it.name].revenue += it.sellPrice * effQty;
+        byName[it.name].qty += effQty;
       }
     }
     return Object.values(byName).sort((a, b) => b.revenue - a.revenue).slice(0, 6);
@@ -1676,23 +1679,42 @@ function ReceiptModal({ sale, onClose }) {
             {sale.cashierName && <div className="receipt-meta">Served by {sale.cashierName}</div>}
             <div className="receipt-divider" />
             <div className="receipt-lines">
-              {sale.items.map((it) => (
-                <div className="receipt-line" key={it.productId}>
-                  <div className="receipt-line-name">{it.name}</div>
-                  <div className="receipt-line-qty mono">{it.qty} × {money(it.sellPrice)}</div>
-                  <div className="receipt-line-total mono">{money(it.qty * it.sellPrice)}</div>
-                </div>
-              ))}
+              {sale.items.map((it) => {
+                const returned = it.returnedQty || 0;
+                const netQty = it.qty - returned;
+                return (
+                  <div className="receipt-line" key={it.productId}>
+                    <div className="receipt-line-name">
+                      {it.name}
+                      {returned > 0 && <span className="receipt-line-returned"> ({returned} returned)</span>}
+                    </div>
+                    <div className="receipt-line-qty mono">{it.qty} × {money(it.sellPrice)}</div>
+                    <div className="receipt-line-total mono">{money(it.qty * it.sellPrice)}</div>
+                  </div>
+                );
+              })}
             </div>
             <div className="receipt-divider" />
             <div className="receipt-total-row">
               <span>TOTAL</span>
               <span className="mono">{money(sale.total)}</span>
             </div>
+            {sale.refundedAmount > 0 && (
+              <>
+                <div className="receipt-refund-row">
+                  <span>Refunded</span>
+                  <span className="mono">-{money(sale.refundedAmount)}</span>
+                </div>
+                <div className="receipt-total-row">
+                  <span>NET TOTAL</span>
+                  <span className="mono">{money(sale.netTotal)}</span>
+                </div>
+              </>
+            )}
             <div className="receipt-payment">
               {sale.paymentMethod === "cash" && "Paid in cash"}
               {sale.paymentMethod === "till" && "Paid via till"}
-              {isDebt && "ON DEBT — NOT YET PAID"}
+              {isDebt && (sale.debtSettled ? "PAID" : "ON DEBT — NOT YET PAID")}
             </div>
             {isDebt && (sale.customerName || sale.customerPhone) && (
               <div className="receipt-meta">
