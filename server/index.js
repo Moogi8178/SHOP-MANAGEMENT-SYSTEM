@@ -7,6 +7,7 @@ const { initDb } = require("./db");
 const productsRouter = require("./routes/products");
 const salesRouter = require("./routes/sales");
 const adminRouter = require("./routes/admin");
+const cashiersRouter = require("./routes/cashiers");
 
 const app = express();
 app.use(cors());
@@ -16,6 +17,7 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.use("/api/products", productsRouter);
 app.use("/api/sales", salesRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/cashiers", cashiersRouter);
 
 // Serve the built React app in production.
 const clientDist = path.join(__dirname, "..", "client", "dist");
