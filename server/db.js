@@ -86,6 +86,33 @@ async function initDb() {
       ts BIGINT NOT NULL
     );
   `);
+
+  // Borrowed items: stock lent out (not sold) and expected back.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS borrows (
+      id TEXT PRIMARY KEY,
+      ts BIGINT NOT NULL,
+      customer_name TEXT,
+      customer_phone TEXT,
+      cashier_id TEXT,
+      cashier_name TEXT,
+      returned BOOLEAN NOT NULL DEFAULT false,
+      returned_at BIGINT
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS borrow_items (
+      id SERIAL PRIMARY KEY,
+      borrow_id TEXT NOT NULL REFERENCES borrows(id) ON DELETE CASCADE,
+      product_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      qty INTEGER NOT NULL,
+      returned_qty INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_borrow_items_borrow_id ON borrow_items(borrow_id);`);
 }
 
 module.exports = { pool, initDb };
