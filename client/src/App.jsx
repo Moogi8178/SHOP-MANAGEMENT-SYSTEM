@@ -6,7 +6,7 @@ import {
 import {
   Hammer, Wrench, Package, TrendingUp, Plus, Search, ShoppingCart,
   Printer, X, AlertTriangle, Lock, LogOut, Boxes, DollarSign, Minus,
-  ImagePlus, Trash2, CheckCircle2, RefreshCw,
+  ImagePlus, Trash2, CheckCircle2, RefreshCw, Pencil,
 } from "lucide-react";
 import { api } from "./api";
 
@@ -193,7 +193,9 @@ function AdminPanel({ products, sales, adminToken, onChanged, onAuthFail }) {
       {tab === "addstock" && (
         <AddStockForm products={products} adminToken={adminToken} onChanged={onChanged} onAuthFail={onAuthFail} />
       )}
-      {tab === "inventory" && <Inventory products={products} />}
+      {tab === "inventory" && (
+        <Inventory products={products} adminToken={adminToken} onChanged={onChanged} onAuthFail={onAuthFail} />
+      )}
     </div>
   );
 }
@@ -441,11 +443,30 @@ function AddStockForm({ products, adminToken, onChanged, onAuthFail }) {
   );
 }
 
-function Inventory({ products }) {
+function Inventory({ products, adminToken, onChanged, onAuthFail }) {
   const [q, setQ] = useState("");
+  const [editing, setEditing] = useState(null); // product being edited, or null
+  const [deletingId, setDeletingId] = useState(null);
+  const [error, setError] = useState("");
+
   const filtered = products
     .filter((p) => p.name.toLowerCase().includes(q.toLowerCase()) || p.category.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => b.dateAdded - a.dateAdded);
+
+  const handleDelete = async (p) => {
+    if (!window.confirm(`Delete "${p.name}" from inventory? This can't be undone.`)) return;
+    setDeletingId(p.id);
+    setError("");
+    try {
+      await api.deleteProduct(p.id, adminToken);
+      await onChanged();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not delete this product.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div>
@@ -453,6 +474,7 @@ function Inventory({ products }) {
         <Search size={16} />
         <input placeholder="Search inventory…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
+      {error && <div className="pin-error" style={{ marginBottom: 10 }}>{error}</div>}
       {filtered.length === 0 ? (
         <EmptyNote text="No products yet — add stock to see it listed here." />
       ) : (
@@ -460,7 +482,7 @@ function Inventory({ products }) {
           <table className="inv-table">
             <thead>
               <tr>
-                <th></th><th>Product</th><th>Category</th><th>Cost</th><th>Sell</th><th>Margin</th><th>Qty</th>
+                <th></th><th>Product</th><th>Category</th><th>Cost</th><th>Sell</th><th>Margin</th><th>Qty</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -476,12 +498,140 @@ function Inventory({ products }) {
                     {p.quantity}
                     {p.quantity <= LOW_STOCK && <Tag tone="danger">low</Tag>}
                   </td>
+                  <td>
+                    <div className="row-actions">
+                      <button className="icon-btn" title="Edit" onClick={() => setEditing(p)}>
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        className="icon-btn icon-btn-danger"
+                        title="Delete"
+                        disabled={deletingId === p.id}
+                        onClick={() => handleDelete(p)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      {editing && (
+        <EditProductModal
+          product={editing}
+          adminToken={adminToken}
+          onClose={() => setEditing(null)}
+          onSaved={async () => {
+            setEditing(null);
+            await onChanged();
+          }}
+          onAuthFail={onAuthFail}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditProductModal({ product, adminToken, onClose, onSaved, onAuthFail }) {
+  const [name, setName] = useState(product.name);
+  const [category, setCategory] = useState(product.category);
+  const [costPrice, setCostPrice] = useState(String(product.costPrice));
+  const [sellPrice, setSellPrice] = useState(String(product.sellPrice));
+  const [quantity, setQuantity] = useState(String(product.quantity));
+  const [imageDataUrl, setImageDataUrl] = useState(product.imageDataUrl);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setImageDataUrl(await compressImage(file));
+    } catch { /* ignore bad image */ }
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!name || costPrice === "" || sellPrice === "" || quantity === "") return;
+    setSaving(true);
+    setError("");
+    try {
+      await api.updateProduct(
+        product.id,
+        {
+          name: name.trim(),
+          category: category.trim(),
+          costPrice: Number(costPrice),
+          sellPrice: Number(sellPrice),
+          quantity: Number(quantity),
+          imageDataUrl,
+        },
+        adminToken
+      );
+      await onSaved();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not save changes.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="card form-card" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <div className="form-title">Edit product</div>
+        <p className="form-hint">Changes here set the exact values below — this replaces the current stock count rather than adding to it.</p>
+
+        <label className="field">
+          <span>Product name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} required />
+        </label>
+
+        <label className="field">
+          <span>Category</span>
+          <input value={category} onChange={(e) => setCategory(e.target.value)} />
+        </label>
+
+        <div className="field-row">
+          <label className="field">
+            <span>Cost price</span>
+            <input type="number" min="0" step="0.01" value={costPrice} onChange={(e) => setCostPrice(e.target.value)} required />
+          </label>
+          <label className="field">
+            <span>Sell price</span>
+            <input type="number" min="0" step="0.01" value={sellPrice} onChange={(e) => setSellPrice(e.target.value)} required />
+          </label>
+          <label className="field">
+            <span>Quantity in stock</span>
+            <input type="number" min="0" step="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} required />
+          </label>
+        </div>
+
+        <label className="field">
+          <span>Product photo</span>
+          <div className="image-upload">
+            <ProductThumb src={imageDataUrl} size={64} />
+            <label className="btn btn-ghost">
+              <ImagePlus size={15} /> Change image
+              <input type="file" accept="image/*" onChange={onFile} hidden />
+            </label>
+          </div>
+        </label>
+
+        {error && <div className="pin-error" style={{ marginBottom: 10 }}>{error}</div>}
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" style={{ flex: 1 }} type="submit" disabled={saving}>
+            {saving ? "Saving…" : "Save changes"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
