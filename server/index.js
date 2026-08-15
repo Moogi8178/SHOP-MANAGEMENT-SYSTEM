@@ -8,6 +8,7 @@ const productsRouter = require("./routes/products");
 const salesRouter = require("./routes/sales");
 const adminRouter = require("./routes/admin");
 const cashiersRouter = require("./routes/cashiers");
+const pettyCashRouter = require("./routes/pettycash");
 
 const app = express();
 app.use(cors());
@@ -18,6 +19,7 @@ app.use("/api/products", productsRouter);
 app.use("/api/sales", salesRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/cashiers", cashiersRouter);
+app.use("/api/pettycash", pettyCashRouter);
 
 // Serve the built React app in production.
 const clientDist = path.join(__dirname, "..", "client", "dist");
