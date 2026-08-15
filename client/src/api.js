@@ -35,10 +35,10 @@ export const api = {
 
   getSales: () => fetch("/api/sales").then(handle),
 
-  createSale: (items) =>
+  createSale: (items, cashierToken) =>
     fetch("/api/sales", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cashierToken}` },
       body: JSON.stringify({ items }),
     }).then(handle),
 
@@ -47,5 +47,28 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pin }),
+    }).then(handle),
+
+  cashierLogin: (username, password) =>
+    fetch("/api/cashiers/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    }).then(handle),
+
+  listCashiers: (token) =>
+    fetch("/api/cashiers", { headers: { Authorization: `Bearer ${token}` } }).then(handle),
+
+  createCashier: (payload, token) =>
+    fetch("/api/cashiers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    }).then(handle),
+
+  deleteCashier: (id, token) =>
+    fetch(`/api/cashiers/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
     }).then(handle),
 };
