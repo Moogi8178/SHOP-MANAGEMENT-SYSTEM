@@ -35,11 +35,17 @@ export const api = {
 
   getSales: () => fetch("/api/sales").then(handle),
 
-  createSale: (items, cashierToken) =>
+  createSale: (payload, cashierToken) =>
     fetch("/api/sales", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cashierToken}` },
-      body: JSON.stringify({ items }),
+      body: JSON.stringify(payload),
+    }).then(handle),
+
+  settleDebt: (id, token) =>
+    fetch(`/api/sales/${id}/settle-debt`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}` },
     }).then(handle),
 
   adminLogin: (pin) =>
