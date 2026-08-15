@@ -157,6 +157,29 @@ input{ font-family:inherit; }
 .return-row{ display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--concrete-100); padding-bottom:8px; }
 .return-qty-input{ width:64px; border:1px solid var(--concrete-200); border-radius:7px; padding:7px 8px; font-size:14px; text-align:center; font-family:'IBM Plex Mono',monospace; }
 
+.autocomplete-list{ background:#fff; border:1px solid var(--concrete-200); border-radius:8px; margin-top:-8px; margin-bottom:14px; overflow:hidden; }
+.autocomplete-item{ display:block; width:100%; text-align:left; background:none; border:none; padding:9px 12px; font-size:13.5px; border-bottom:1px solid var(--concrete-100); }
+.autocomplete-item:last-child{ border-bottom:none; }
+.autocomplete-item:hover{ background:var(--concrete-100); }
+
+.report-paper{ background:#fff; border:1px solid var(--concrete-200); border-radius:10px; padding:26px; max-width:720px; margin:0 auto; }
+.report-header{ display:flex; justify-content:space-between; align-items:baseline; border-bottom:2px solid var(--steel-900); padding-bottom:12px; margin-bottom:16px; }
+.report-store{ font-family:'Space Grotesk',sans-serif; font-weight:700; letter-spacing:0.05em; font-size:16px; }
+.report-title{ font-size:13px; color:var(--ink-500); }
+.report-customer{ margin-bottom:16px; }
+.report-customer-name{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:19px; }
+.report-customer-phone{ font-size:12.5px; color:var(--ink-500); }
+.report-summary-row{ display:flex; gap:24px; background:var(--concrete-100); border-radius:8px; padding:14px 18px; margin-bottom:18px; }
+.report-summary-label{ font-size:11px; color:var(--ink-500); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px; }
+.report-summary-value{ font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:16px; }
+.report-table{ width:100%; border-collapse:collapse; }
+.report-table th{ text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.04em; color:var(--ink-500); padding:8px 10px; border-bottom:1px solid var(--concrete-200); }
+.report-table td{ padding:9px 10px; border-bottom:1px solid var(--concrete-100); font-size:13px; vertical-align:top; }
+
+@media print{
+  .report-paper{ border:none; max-width:none; padding:0; }
+}
+
 @media print{
   body *{ visibility:hidden; }
   .receipt-print, .receipt-print *{ visibility:visible; }
