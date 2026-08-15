@@ -7,7 +7,7 @@ import {
   Hammer, Wrench, Package, TrendingUp, Plus, Search, ShoppingCart,
   Printer, X, AlertTriangle, Lock, LogOut, Boxes, DollarSign, Minus,
   ImagePlus, Trash2, CheckCircle2, RefreshCw, Pencil, User, UserPlus, History,
-  Wallet, RotateCcw,
+  Wallet, RotateCcw, Repeat,
 } from "lucide-react";
 import { api } from "./api";
 
@@ -229,6 +229,9 @@ function AdminPanel({ products, sales, adminToken, onChanged, onAuthFail }) {
         <button className={tab === "debts" ? "active" : ""} onClick={() => setTab("debts")}>
           <AlertTriangle size={15} /> Debts
         </button>
+        <button className={tab === "borrows" ? "active" : ""} onClick={() => setTab("borrows")}>
+          <Repeat size={15} /> Borrowed Items
+        </button>
         <button className={tab === "cashiers" ? "active" : ""} onClick={() => setTab("cashiers")}>
           <UserPlus size={15} /> Cashiers
         </button>
@@ -246,6 +249,7 @@ function AdminPanel({ products, sales, adminToken, onChanged, onAuthFail }) {
       )}
       {tab === "sales" && <SalesHistory sales={sales} adminToken={adminToken} onChanged={onChanged} onAuthFail={onAuthFail} />}
       {tab === "debts" && <Debts sales={sales} adminToken={adminToken} onChanged={onChanged} onAuthFail={onAuthFail} />}
+      {tab === "borrows" && <Borrows adminToken={adminToken} onAuthFail={onAuthFail} />}
       {tab === "cashiers" && <Cashiers adminToken={adminToken} onAuthFail={onAuthFail} />}
       {tab === "pettycash" && <PettyCash adminToken={adminToken} onAuthFail={onAuthFail} />}
     </div>
@@ -584,6 +588,254 @@ function Debts({ sales, adminToken, onChanged, onAuthFail }) {
       )}
 
       {viewing && <ReceiptModal sale={viewing} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}
+
+function Borrows({ adminToken, onAuthFail }) {
+  const [borrows, setBorrows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("outstanding"); // outstanding | returned | all
+  const [returning, setReturning] = useState(null);
+  const [viewingSlip, setViewingSlip] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      const list = await api.listBorrows(adminToken);
+      setBorrows(list);
+      setError("");
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not load borrow records.");
+    } finally {
+      setLoading(false);
+    }
+  }, [adminToken, onAuthFail]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const sorted = [...borrows].sort((a, b) => b.timestamp - a.timestamp);
+  const filtered = sorted.filter((b) => {
+    if (statusFilter === "outstanding" && b.returned) return false;
+    if (statusFilter === "returned" && !b.returned) return false;
+    const needle = q.toLowerCase();
+    return (
+      (b.customerName || "").toLowerCase().includes(needle) ||
+      (b.customerPhone || "").toLowerCase().includes(needle) ||
+      b.id.slice(-6).toLowerCase().includes(needle) ||
+      b.items.some((it) => it.name.toLowerCase().includes(needle))
+    );
+  });
+
+  const outstandingCount = borrows.filter((b) => !b.returned).length;
+
+  return (
+    <div>
+      <div className="kpi-card kpi-highlight" style={{ marginBottom: 14, maxWidth: 280 }}>
+        <div className="kpi-label"><Repeat size={14} /> Items awaiting return</div>
+        <div className="kpi-value">{outstandingCount}</div>
+        <div className="kpi-sub">borrow record{outstandingCount === 1 ? "" : "s"} outstanding</div>
+      </div>
+
+      <div className="txn-filter-row">
+        <div className="search-row" style={{ flex: 1, marginBottom: 0 }}>
+          <Search size={16} />
+          <input placeholder="Search by customer name, phone, product, or ticket #…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div className="subnav" style={{ marginBottom: 0 }}>
+          <button className={statusFilter === "outstanding" ? "active" : ""} onClick={() => setStatusFilter("outstanding")}>Outstanding</button>
+          <button className={statusFilter === "returned" ? "active" : ""} onClick={() => setStatusFilter("returned")}>Returned</button>
+          <button className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>All</button>
+        </div>
+      </div>
+
+      {error && <div className="pin-error" style={{ margin: "10px 0" }}>{error}</div>}
+
+      {loading ? (
+        <EmptyNote text="Loading…" />
+      ) : filtered.length === 0 ? (
+        <EmptyNote text="No borrow records match this filter." />
+      ) : (
+        <div className="table-wrap">
+          <table className="inv-table">
+            <thead>
+              <tr>
+                <th>Date</th><th>Customer</th><th>Phone</th><th>Items</th><th>Cashier</th><th>Status</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((b) => {
+                const dt = new Date(b.timestamp);
+                const canReturn = b.items.some((it) => it.qty - (it.returnedQty || 0) > 0);
+                const itemsSummary = b.items.map((it) => `${it.name} ×${it.qty}`).join(", ");
+                return (
+                  <tr key={b.id} className={!b.returned ? "row-low" : ""}>
+                    <td className="mono">{dt.toLocaleDateString()}</td>
+                    <td className="cell-name">{b.customerName || "—"}</td>
+                    <td className="mono">{b.customerPhone || "—"}</td>
+                    <td style={{ maxWidth: 240 }}>{itemsSummary}</td>
+                    <td>{b.cashierName || "—"}</td>
+                    <td><Tag tone={b.returned ? "default" : "danger"}>{b.returned ? "Returned" : "Outstanding"}</Tag></td>
+                    <td>
+                      <div className="row-actions">
+                        <button className="icon-btn" title="View slip" onClick={() => setViewingSlip(b)}>
+                          <Printer size={14} />
+                        </button>
+                        {canReturn && (
+                          <button className="icon-btn" title="Process return" onClick={() => setReturning(b)}>
+                            <RotateCcw size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {viewingSlip && <BorrowSlipModal borrow={viewingSlip} onClose={() => setViewingSlip(null)} />}
+      {returning && (
+        <BorrowReturnModal
+          borrow={returning}
+          adminToken={adminToken}
+          onClose={() => setReturning(null)}
+          onDone={async () => {
+            setReturning(null);
+            await load();
+          }}
+          onAuthFail={onAuthFail}
+        />
+      )}
+    </div>
+  );
+}
+
+function BorrowReturnModal({ borrow, adminToken, onClose, onDone, onAuthFail }) {
+  const [qtys, setQtys] = useState(() => Object.fromEntries(borrow.items.map((it) => [it.productId, 0])));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const setQty = (productId, val, max) => {
+    const n = Math.max(0, Math.min(max, Math.floor(Number(val) || 0)));
+    setQtys((prev) => ({ ...prev, [productId]: n }));
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const items = borrow.items
+      .map((it) => ({ productId: it.productId, qty: qtys[it.productId] || 0 }))
+      .filter((l) => l.qty > 0);
+    if (items.length === 0) {
+      setError("Enter a quantity for at least one item.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await api.returnBorrowItems(borrow.id, items, adminToken);
+      await onDone();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not process this return.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="card form-card" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <div className="form-title">Process a return</div>
+        <p className="form-hint">
+          {borrow.customerName || "Customer"} — set how many units of each item are being returned. Stock is added back automatically.
+        </p>
+
+        <div className="return-items">
+          {borrow.items.map((it) => {
+            const remaining = it.qty - (it.returnedQty || 0);
+            return (
+              <div className="return-row" key={it.productId}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{it.name}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-500)" }}>{remaining} of {it.qty} still out</div>
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  max={remaining}
+                  step="1"
+                  className="return-qty-input"
+                  value={qtys[it.productId] || 0}
+                  disabled={remaining === 0}
+                  onChange={(e) => setQty(it.productId, e.target.value, remaining)}
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        {error && <div className="pin-error" style={{ margin: "10px 0" }}>{error}</div>}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" style={{ flex: 1 }} type="submit" disabled={saving}>
+            {saving ? "Processing…" : "Process return"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function BorrowSlipModal({ borrow, onClose }) {
+  const dt = new Date(borrow.timestamp);
+  return (
+    <div className="modal-backdrop">
+      <div className="receipt-shell">
+        <div className="receipt-print">
+          <div className="receipt-paper">
+            <div className="receipt-store">{STORE_NAME}</div>
+            <div className="receipt-sub">Borrow Slip</div>
+            <div className="receipt-meta">
+              {dt.toLocaleDateString()} {dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </div>
+            <div className="receipt-meta">Ticket #{borrow.id.slice(-6).toUpperCase()}</div>
+            {borrow.cashierName && <div className="receipt-meta">Issued by {borrow.cashierName}</div>}
+            <div className="receipt-divider" />
+            <div className="receipt-meta" style={{ fontWeight: 700 }}>{borrow.customerName || "—"}</div>
+            {borrow.customerPhone && <div className="receipt-meta">{borrow.customerPhone}</div>}
+            <div className="receipt-divider" />
+            <div className="receipt-lines">
+              {borrow.items.map((it) => {
+                const returned = it.returnedQty || 0;
+                return (
+                  <div className="receipt-line" key={it.productId}>
+                    <div className="receipt-line-name">
+                      {it.name}
+                      {returned > 0 && <span className="receipt-line-returned"> ({returned} returned)</span>}
+                    </div>
+                    <div className="receipt-line-qty mono">Qty {it.qty}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="receipt-divider" />
+            <div className="receipt-payment" style={{ color: borrow.returned ? "var(--forest-600)" : "var(--rust-600)" }}>
+              {borrow.returned ? "ALL ITEMS RETURNED" : "AWAITING RETURN"}
+            </div>
+            <div className="receipt-footer">Please bring these items back to {STORE_NAME}</div>
+          </div>
+        </div>
+        <div className="receipt-actions no-print">
+          <button className="btn btn-ghost" onClick={onClose}><X size={15} /> Close</button>
+          <button className="btn btn-primary" onClick={() => window.print()}><Printer size={15} /> Print</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1278,6 +1530,9 @@ function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCa
   const [pricePromptProduct, setPricePromptProduct] = useState(null); // product awaiting a chosen price
   const [showCheckout, setShowCheckout] = useState(false);
   const [showPettyCash, setShowPettyCash] = useState(false);
+  const [showBorrow, setShowBorrow] = useState(false);
+  const [borrowSlip, setBorrowSlip] = useState(null);
+  const [borrowing, setBorrowing] = useState(false);
 
   if (!cashierToken) {
     return <CashierLogin loginCashier={loginCashier} />;
@@ -1359,6 +1614,30 @@ function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCa
     }
   };
 
+  const completeBorrow = async ({ customerName, customerPhone }) => {
+    setBorrowing(true);
+    setError("");
+    try {
+      const borrow = await api.createBorrow(
+        {
+          items: cart.map((c) => ({ productId: c.productId, qty: c.qty })),
+          customerName,
+          customerPhone,
+        },
+        cashierToken
+      );
+      setBorrowSlip(borrow);
+      setCart([]);
+      setShowBorrow(false);
+      await onChanged();
+    } catch (err) {
+      setError(err.message || "Could not log this borrow.");
+      setShowBorrow(false);
+    } finally {
+      setBorrowing(false);
+    }
+  };
+
   return (
     <div className="register-wrap">
       <div className="catalog">
@@ -1432,6 +1711,15 @@ function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCa
         <button className="btn btn-primary" style={{ width: "100%" }} disabled={cart.length === 0 || checkingOut} onClick={() => setShowCheckout(true)}>
           {checkingOut ? "Processing…" : "Checkout"}
         </button>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          style={{ width: "100%", marginTop: 8 }}
+          disabled={cart.length === 0 || borrowing}
+          onClick={() => setShowBorrow(true)}
+        >
+          <Repeat size={15} /> {borrowing ? "Logging…" : "Borrow (no payment)"}
+        </button>
       </div>
 
       {pricePromptProduct && (
@@ -1458,7 +1746,17 @@ function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCa
         />
       )}
 
+      {showBorrow && (
+        <BorrowRequestModal
+          items={cart}
+          borrowing={borrowing}
+          onCancel={() => setShowBorrow(false)}
+          onConfirm={completeBorrow}
+        />
+      )}
+
       {receipt && <ReceiptModal sale={receipt} onClose={() => setReceipt(null)} />}
+      {borrowSlip && <BorrowSlipModal borrow={borrowSlip} onClose={() => setBorrowSlip(null)} />}
       {showPettyCash && (
         <PettyCashModal cashierToken={cashierToken} cashierName={cashierName} onClose={() => setShowPettyCash(false)} />
       )}
@@ -1608,6 +1906,59 @@ function CheckoutModal({ total, checkingOut, onCancel, onConfirm }) {
           <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</button>
           <button className="btn btn-primary" style={{ flex: 1 }} type="submit" disabled={checkingOut}>
             {checkingOut ? "Processing…" : "Complete sale"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function BorrowRequestModal({ items, borrowing, onCancel, onConfirm }) {
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [error, setError] = useState("");
+
+  const confirm = (e) => {
+    e.preventDefault();
+    if (!customerName.trim()) {
+      setError("A customer name is required so you know who has the items.");
+      return;
+    }
+    onConfirm({ customerName: customerName.trim(), customerPhone: customerPhone.trim() });
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <form className="card form-card" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()} onSubmit={confirm}>
+        <div className="form-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Repeat size={18} /> Borrow items
+        </div>
+        <p className="form-hint">No payment is taken — these items leave stock and are expected back. Record who has them.</p>
+
+        <div className="return-items" style={{ marginBottom: 14 }}>
+          {items.map((it) => (
+            <div className="return-row" key={it.productId} style={{ borderBottom: "none", paddingBottom: 0 }}>
+              <div style={{ fontSize: 13 }}>{it.name}</div>
+              <div className="mono" style={{ fontSize: 13 }}>×{it.qty}</div>
+            </div>
+          ))}
+        </div>
+
+        <label className="field">
+          <span>Customer name</span>
+          <input autoFocus value={customerName} onChange={(e) => { setCustomerName(e.target.value); setError(""); }} placeholder="e.g. John Mwangi" required />
+        </label>
+        <label className="field">
+          <span>Phone number (optional)</span>
+          <input value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="e.g. 07xx xxx xxx" />
+        </label>
+
+        {error && <div className="pin-error" style={{ marginBottom: 10 }}>{error}</div>}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" style={{ flex: 1 }} type="submit" disabled={borrowing}>
+            {borrowing ? "Logging…" : "Log borrow"}
           </button>
         </div>
       </form>
