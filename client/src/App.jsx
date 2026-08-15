@@ -7,7 +7,7 @@ import {
   Hammer, Wrench, Package, TrendingUp, Plus, Search, ShoppingCart,
   Printer, X, AlertTriangle, Lock, LogOut, Boxes, DollarSign, Minus,
   ImagePlus, Trash2, CheckCircle2, RefreshCw, Pencil, User, UserPlus, History,
-  Wallet, RotateCcw, Repeat,
+  Wallet, RotateCcw, Repeat, FileText,
 } from "lucide-react";
 import { api } from "./api";
 
@@ -232,6 +232,9 @@ function AdminPanel({ products, sales, adminToken, onChanged, onAuthFail }) {
         <button className={tab === "borrows" ? "active" : ""} onClick={() => setTab("borrows")}>
           <Repeat size={15} /> Borrowed Items
         </button>
+        <button className={tab === "customerreport" ? "active" : ""} onClick={() => setTab("customerreport")}>
+          <FileText size={15} /> Customer Report
+        </button>
         <button className={tab === "cashiers" ? "active" : ""} onClick={() => setTab("cashiers")}>
           <UserPlus size={15} /> Cashiers
         </button>
@@ -250,6 +253,7 @@ function AdminPanel({ products, sales, adminToken, onChanged, onAuthFail }) {
       {tab === "sales" && <SalesHistory sales={sales} adminToken={adminToken} onChanged={onChanged} onAuthFail={onAuthFail} />}
       {tab === "debts" && <Debts sales={sales} adminToken={adminToken} onChanged={onChanged} onAuthFail={onAuthFail} />}
       {tab === "borrows" && <Borrows adminToken={adminToken} onAuthFail={onAuthFail} />}
+      {tab === "customerreport" && <CustomerReport sales={sales} adminToken={adminToken} onAuthFail={onAuthFail} />}
       {tab === "cashiers" && <Cashiers adminToken={adminToken} onAuthFail={onAuthFail} />}
       {tab === "pettycash" && <PettyCash adminToken={adminToken} onAuthFail={onAuthFail} />}
     </div>
@@ -836,6 +840,163 @@ function BorrowSlipModal({ borrow, onClose }) {
           <button className="btn btn-primary" onClick={() => window.print()}><Printer size={15} /> Print</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function CustomerReport({ sales, adminToken, onAuthFail }) {
+  const [borrows, setBorrows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [selectedName, setSelectedName] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const list = await api.listBorrows(adminToken);
+      setBorrows(list);
+      setError("");
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not load borrow records.");
+    } finally {
+      setLoading(false);
+    }
+  }, [adminToken, onAuthFail]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const debtSales = sales.filter((s) => s.paymentMethod === "debt" && s.customerName);
+
+  const allNames = useMemo(() => {
+    const map = new Map();
+    const add = (name) => {
+      if (!name) return;
+      const key = name.trim().toLowerCase();
+      if (key && !map.has(key)) map.set(key, name.trim());
+    };
+    debtSales.forEach((s) => add(s.customerName));
+    borrows.forEach((b) => add(b.customerName));
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+  }, [debtSales, borrows]);
+
+  const suggestions =
+    query && query.toLowerCase() !== selectedName.toLowerCase()
+      ? allNames.filter((n) => n.toLowerCase().includes(query.toLowerCase()))
+      : [];
+
+  const matchName = (name) => name && name.trim().toLowerCase() === selectedName.trim().toLowerCase();
+  const customerDebts = selectedName ? debtSales.filter((s) => matchName(s.customerName)) : [];
+  const customerBorrows = selectedName ? borrows.filter((b) => matchName(b.customerName)) : [];
+
+  const timeline = [
+    ...customerDebts.map((s) => ({ type: "debt", timestamp: s.timestamp, record: s })),
+    ...customerBorrows.map((b) => ({ type: "borrow", timestamp: b.timestamp, record: b })),
+  ].sort((a, b) => b.timestamp - a.timestamp);
+
+  const phone =
+    [...customerDebts].reverse().find((s) => s.customerPhone)?.customerPhone ||
+    [...customerBorrows].reverse().find((b) => b.customerPhone)?.customerPhone ||
+    null;
+
+  const outstandingDebtTotal = customerDebts.filter((s) => !s.debtSettled).reduce((n, s) => n + s.netTotal, 0);
+  const outstandingBorrowCount = customerBorrows.filter((b) => !b.returned).length;
+
+  return (
+    <div>
+      <div className="search-row" style={{ position: "relative" }}>
+        <Search size={16} />
+        <input
+          placeholder="Type a customer name…"
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setSelectedName(""); }}
+        />
+      </div>
+      {suggestions.length > 0 && (
+        <div className="autocomplete-list no-print">
+          {suggestions.slice(0, 8).map((n) => (
+            <button key={n} type="button" className="autocomplete-item" onClick={() => { setSelectedName(n); setQuery(n); }}>
+              {n}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {error && <div className="pin-error" style={{ marginTop: 10 }}>{error}</div>}
+
+      {loading ? (
+        <EmptyNote text="Loading…" />
+      ) : !selectedName ? (
+        <EmptyNote text={allNames.length === 0 ? "No debt or borrow customers recorded yet." : "Search and select a customer to generate their report."} />
+      ) : (
+        <div className="receipt-print">
+          <div className="no-print" style={{ display: "flex", justifyContent: "flex-end", margin: "14px 0" }}>
+            <button className="btn btn-primary" onClick={() => window.print()}><Printer size={15} /> Print report</button>
+          </div>
+
+          <div className="report-paper">
+            <div className="report-header">
+              <div className="report-store">{STORE_NAME}</div>
+              <div className="report-title">Customer Report</div>
+            </div>
+
+            <div className="report-customer">
+              <div className="report-customer-name">{selectedName}</div>
+              {phone && <div className="report-customer-phone">{phone}</div>}
+            </div>
+
+            <div className="report-summary-row">
+              <div>
+                <div className="report-summary-label">Outstanding debt</div>
+                <div className="report-summary-value">{money(outstandingDebtTotal)}</div>
+              </div>
+              <div>
+                <div className="report-summary-label">Items still borrowed</div>
+                <div className="report-summary-value">{outstandingBorrowCount}</div>
+              </div>
+              <div>
+                <div className="report-summary-label">Total records</div>
+                <div className="report-summary-value">{timeline.length}</div>
+              </div>
+            </div>
+
+            {timeline.length === 0 ? (
+              <EmptyNote text="No debt or borrow records for this customer." />
+            ) : (
+              <table className="report-table">
+                <thead>
+                  <tr><th>Date</th><th>Type</th><th>Items</th><th>Amount</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  {timeline.map(({ type, timestamp, record }) => {
+                    const dt = new Date(timestamp);
+                    if (type === "debt") {
+                      return (
+                        <tr key={`debt-${record.id}`}>
+                          <td>{dt.toLocaleDateString()}</td>
+                          <td><Tag>Debt</Tag></td>
+                          <td>{record.items.map((it) => `${it.name} ×${it.qty}`).join(", ")}</td>
+                          <td className="mono">{money(record.netTotal)}</td>
+                          <td><Tag tone={record.debtSettled ? "default" : "danger"}>{record.debtSettled ? "Paid" : "Outstanding"}</Tag></td>
+                        </tr>
+                      );
+                    }
+                    return (
+                      <tr key={`borrow-${record.id}`}>
+                        <td>{dt.toLocaleDateString()}</td>
+                        <td><Tag>Borrow</Tag></td>
+                        <td>{record.items.map((it) => `${it.name} ×${it.qty}${it.returnedQty ? ` (${it.returnedQty} returned)` : ""}`).join(", ")}</td>
+                        <td className="mono">—</td>
+                        <td><Tag tone={record.returned ? "default" : "danger"}>{record.returned ? "Returned" : "Outstanding"}</Tag></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
