@@ -8,16 +8,30 @@ const router = express.Router();
 const PAYMENT_METHODS = ["cash", "till", "debt"];
 
 function saleRow(s) {
+  const refundedAmount = Number(s.refunded_amount || 0);
   return {
     id: s.id,
     timestamp: Number(s.ts),
     total: Number(s.total),
+    refundedAmount,
+    netTotal: Number(s.total) - refundedAmount,
     cashierName: s.cashier_name || null,
     paymentMethod: s.payment_method || "cash",
     customerName: s.customer_name || null,
     customerPhone: s.customer_phone || null,
     debtSettled: s.debt_settled,
     items: [],
+  };
+}
+
+function itemRow(it) {
+  return {
+    productId: it.product_id,
+    name: it.name,
+    sellPrice: Number(it.sell_price),
+    costPrice: Number(it.cost_price),
+    qty: it.qty,
+    returnedQty: it.returned_qty || 0,
   };
 }
 
@@ -28,15 +42,7 @@ router.get("/", async (_req, res) => {
   const bySale = {};
   for (const s of sales) bySale[s.id] = saleRow(s);
   for (const it of items) {
-    if (bySale[it.sale_id]) {
-      bySale[it.sale_id].items.push({
-        productId: it.product_id,
-        name: it.name,
-        sellPrice: Number(it.sell_price),
-        costPrice: Number(it.cost_price),
-        qty: it.qty,
-      });
-    }
+    if (bySale[it.sale_id]) bySale[it.sale_id].items.push(itemRow(it));
   }
   res.json(Object.values(bySale));
 });
@@ -115,12 +121,14 @@ router.post("/", requireCashierOrAdmin, async (req, res) => {
       id: saleId,
       timestamp: ts,
       total,
+      refundedAmount: 0,
+      netTotal: total,
       cashierName,
       paymentMethod: method,
       customerName: cName,
       customerPhone: cPhone,
       debtSettled,
-      items: saleItems,
+      items: saleItems.map((it) => ({ ...it, returnedQty: 0 })),
     });
   } catch (err) {
     await client.query("ROLLBACK");
@@ -138,7 +146,78 @@ router.patch("/:id/settle-debt", requireAdmin, async (req, res) => {
     [req.params.id]
   );
   if (rows.length === 0) return res.status(404).json({ error: "Debt sale not found." });
-  res.json(saleRow(rows[0]));
+  const sale = saleRow(rows[0]);
+  const { rows: items } = await pool.query("SELECT * FROM sale_items WHERE sale_id = $1 ORDER BY id ASC", [req.params.id]);
+  sale.items = items.map(itemRow);
+  res.json(sale);
+});
+
+// Admin: process a return for one or more items on a sale. Restocks the
+// returned quantity and increases the sale's refunded_amount; the original
+// sale record is kept intact for audit purposes.
+// Body: { items: [{ productId, qty }] }
+router.patch("/:id/return", requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { items } = req.body || {};
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: "Select at least one item to return." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: saleRows } = await client.query("SELECT * FROM sales WHERE id = $1 FOR UPDATE", [id]);
+    if (saleRows.length === 0) throw { status: 404, message: "Sale not found." };
+
+    let refundTotal = 0;
+
+    for (const line of items) {
+      const qty = Number(line.qty);
+      if (!line.productId || !qty || qty <= 0) continue;
+
+      const { rows: itemRows } = await client.query(
+        "SELECT * FROM sale_items WHERE sale_id = $1 AND product_id = $2 FOR UPDATE",
+        [id, line.productId]
+      );
+      const item = itemRows[0];
+      if (!item) throw { status: 404, message: "That item isn't part of this sale." };
+
+      const remaining = item.qty - item.returned_qty;
+      if (qty > remaining) {
+        throw { status: 400, message: `Only ${remaining} of ${item.name} can still be returned.` };
+      }
+
+      await client.query("UPDATE sale_items SET returned_qty = returned_qty + $1 WHERE id = $2", [qty, item.id]);
+      await client.query("UPDATE products SET quantity = quantity + $1 WHERE id = $2", [qty, item.product_id]);
+
+      refundTotal += qty * Number(item.sell_price);
+    }
+
+    if (refundTotal === 0) throw { status: 400, message: "Select at least one item to return." };
+
+    const { rows: updatedSaleRows } = await client.query(
+      "UPDATE sales SET refunded_amount = refunded_amount + $1 WHERE id = $2 RETURNING *",
+      [refundTotal, id]
+    );
+
+    const { rows: updatedItems } = await client.query(
+      "SELECT * FROM sale_items WHERE sale_id = $1 ORDER BY id ASC",
+      [id]
+    );
+
+    await client.query("COMMIT");
+
+    const result = saleRow(updatedSaleRows[0]);
+    result.items = updatedItems.map(itemRow);
+    res.json(result);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    const status = err.status || 500;
+    res.status(status).json({ error: err.message || "Could not process the return." });
+  } finally {
+    client.release();
+  }
 });
 
 module.exports = router;
