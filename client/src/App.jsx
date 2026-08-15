@@ -14,7 +14,10 @@ const LOW_STOCK = 5;
 const STORE_NAME = "EKAMBI HARDWARE";
 
 const money = (n) => `KSh ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+const priceDisplay = (p) =>
+  p.priceMin != null && p.priceMax != null ? `${money(p.priceMin)} – ${money(p.priceMax)}` : money(p.sellPrice);
 const dateKey = (ts) => new Date(ts).toISOString().slice(0, 10);
+const todayKey = () => dateKey(Date.now());
 
 function compressImage(file) {
   return new Promise((resolve, reject) => {
@@ -222,6 +225,9 @@ function AdminPanel({ products, sales, adminToken, onChanged, onAuthFail }) {
         <button className={tab === "sales" ? "active" : ""} onClick={() => setTab("sales")}>
           <History size={15} /> Sales History
         </button>
+        <button className={tab === "debts" ? "active" : ""} onClick={() => setTab("debts")}>
+          <AlertTriangle size={15} /> Debts
+        </button>
         <button className={tab === "cashiers" ? "active" : ""} onClick={() => setTab("cashiers")}>
           <UserPlus size={15} /> Cashiers
         </button>
@@ -235,6 +241,7 @@ function AdminPanel({ products, sales, adminToken, onChanged, onAuthFail }) {
         <Inventory products={products} adminToken={adminToken} onChanged={onChanged} onAuthFail={onAuthFail} />
       )}
       {tab === "sales" && <SalesHistory sales={sales} />}
+      {tab === "debts" && <Debts sales={sales} adminToken={adminToken} onChanged={onChanged} onAuthFail={onAuthFail} />}
       {tab === "cashiers" && <Cashiers adminToken={adminToken} onAuthFail={onAuthFail} />}
     </div>
   );
@@ -242,10 +249,13 @@ function AdminPanel({ products, sales, adminToken, onChanged, onAuthFail }) {
 
 function SalesHistory({ sales }) {
   const [q, setQ] = useState("");
+  const [dateFilter, setDateFilter] = useState(todayKey());
+  const [showAllDates, setShowAllDates] = useState(false);
   const [viewing, setViewing] = useState(null);
 
   const sorted = [...sales].sort((a, b) => b.timestamp - a.timestamp);
-  const filtered = sorted.filter((s) => {
+  const dateFiltered = showAllDates ? sorted : sorted.filter((s) => dateKey(s.timestamp) === dateFilter);
+  const filtered = dateFiltered.filter((s) => {
     const needle = q.toLowerCase();
     return (
       s.id.slice(-6).toLowerCase().includes(needle) ||
@@ -254,20 +264,59 @@ function SalesHistory({ sales }) {
     );
   });
 
+  const summary = useMemo(() => {
+    const s = { cash: 0, till: 0, debt: 0, total: 0, count: filtered.length };
+    for (const sale of filtered) {
+      s[sale.paymentMethod || "cash"] = (s[sale.paymentMethod || "cash"] || 0) + sale.total;
+      s.total += sale.total;
+    }
+    return s;
+  }, [filtered]);
+
   return (
     <div>
-      <div className="search-row">
-        <Search size={16} />
-        <input placeholder="Search by ticket #, cashier, or product…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="txn-filter-row">
+        <div className="search-row" style={{ flex: 1, marginBottom: 0 }}>
+          <Search size={16} />
+          <input placeholder="Search by ticket #, cashier, or product…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        {!showAllDates && (
+          <input type="date" className="date-input" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
+        )}
+        <label className="checkbox-field" style={{ marginBottom: 0, whiteSpace: "nowrap" }}>
+          <input type="checkbox" checked={showAllDates} onChange={(e) => setShowAllDates(e.target.checked)} />
+          <span>All dates</span>
+        </label>
       </div>
+
+      <div className="kpi-grid" style={{ marginTop: 14 }}>
+        <div className="kpi-card">
+          <div className="kpi-label"><DollarSign size={14} /> Cash</div>
+          <div className="kpi-value">{money(summary.cash)}</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label"><DollarSign size={14} /> Till</div>
+          <div className="kpi-value">{money(summary.till)}</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label"><AlertTriangle size={14} /> Debt</div>
+          <div className="kpi-value">{money(summary.debt)}</div>
+        </div>
+        <div className="kpi-card kpi-highlight">
+          <div className="kpi-label"><TrendingUp size={14} /> Total</div>
+          <div className="kpi-value">{money(summary.total)}</div>
+          <div className="kpi-sub">{summary.count} transaction{summary.count === 1 ? "" : "s"}</div>
+        </div>
+      </div>
+
       {filtered.length === 0 ? (
-        <EmptyNote text={sales.length === 0 ? "No sales recorded yet." : "No sales match that search."} />
+        <EmptyNote text={sales.length === 0 ? "No sales recorded yet." : "No sales match this filter."} />
       ) : (
         <div className="table-wrap">
           <table className="inv-table">
             <thead>
               <tr>
-                <th>Date &amp; time</th><th>Ticket</th><th>Cashier</th><th>Items</th><th>Total</th><th></th>
+                <th>Date &amp; time</th><th>Ticket</th><th>Cashier</th><th>Payment</th><th>Items</th><th>Total</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -279,12 +328,130 @@ function SalesHistory({ sales }) {
                     <td className="mono">{dt.toLocaleDateString()} {dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
                     <td className="mono">#{s.id.slice(-6).toUpperCase()}</td>
                     <td>{s.cashierName || <span className="empty-note" style={{ padding: 0 }}>—</span>}</td>
+                    <td><PaymentBadge method={s.paymentMethod} settled={s.debtSettled} /></td>
                     <td className="mono">{itemCount}</td>
                     <td className="mono">{money(s.total)}</td>
                     <td>
                       <button className="icon-btn" title="View / print receipt" onClick={() => setViewing(s)}>
                         <Printer size={14} />
                       </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {viewing && <ReceiptModal sale={viewing} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}
+
+function PaymentBadge({ method, settled }) {
+  if (method === "debt") {
+    return <Tag tone={settled ? "default" : "danger"}>{settled ? "Debt (paid)" : "Debt"}</Tag>;
+  }
+  if (method === "till") return <Tag>Till</Tag>;
+  return <Tag>Cash</Tag>;
+}
+
+function Debts({ sales, adminToken, onChanged, onAuthFail }) {
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("outstanding"); // outstanding | settled | all
+  const [settlingId, setSettlingId] = useState(null);
+  const [error, setError] = useState("");
+  const [viewing, setViewing] = useState(null);
+
+  const debts = sales.filter((s) => s.paymentMethod === "debt").sort((a, b) => b.timestamp - a.timestamp);
+  const filtered = debts.filter((s) => {
+    if (statusFilter === "outstanding" && s.debtSettled) return false;
+    if (statusFilter === "settled" && !s.debtSettled) return false;
+    const needle = q.toLowerCase();
+    return (
+      (s.customerName || "").toLowerCase().includes(needle) ||
+      (s.customerPhone || "").toLowerCase().includes(needle) ||
+      s.id.slice(-6).toLowerCase().includes(needle)
+    );
+  });
+
+  const outstandingTotal = debts.filter((s) => !s.debtSettled).reduce((n, s) => n + s.total, 0);
+
+  const markPaid = async (s) => {
+    if (!window.confirm(`Mark ${money(s.total)} from ${s.customerName || "this customer"} as paid?`)) return;
+    setSettlingId(s.id);
+    setError("");
+    try {
+      await api.settleDebt(s.id, adminToken);
+      await onChanged();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not update this debt.");
+    } finally {
+      setSettlingId(null);
+    }
+  };
+
+  return (
+    <div>
+      <div className="kpi-card kpi-highlight" style={{ marginBottom: 14, maxWidth: 280 }}>
+        <div className="kpi-label"><AlertTriangle size={14} /> Outstanding debt</div>
+        <div className="kpi-value">{money(outstandingTotal)}</div>
+        <div className="kpi-sub">{debts.filter((s) => !s.debtSettled).length} unpaid sale(s)</div>
+      </div>
+
+      <div className="txn-filter-row">
+        <div className="search-row" style={{ flex: 1, marginBottom: 0 }}>
+          <Search size={16} />
+          <input placeholder="Search by customer name, phone, or ticket #…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div className="subnav" style={{ marginBottom: 0 }}>
+          <button className={statusFilter === "outstanding" ? "active" : ""} onClick={() => setStatusFilter("outstanding")}>Outstanding</button>
+          <button className={statusFilter === "settled" ? "active" : ""} onClick={() => setStatusFilter("settled")}>Settled</button>
+          <button className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>All</button>
+        </div>
+      </div>
+
+      {error && <div className="pin-error" style={{ margin: "10px 0" }}>{error}</div>}
+
+      {filtered.length === 0 ? (
+        <EmptyNote text="No debts match this filter." />
+      ) : (
+        <div className="table-wrap">
+          <table className="inv-table">
+            <thead>
+              <tr>
+                <th>Date</th><th>Customer</th><th>Phone</th><th>Ticket</th><th>Amount</th><th>Status</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((s) => {
+                const dt = new Date(s.timestamp);
+                return (
+                  <tr key={s.id} className={!s.debtSettled ? "row-low" : ""}>
+                    <td className="mono">{dt.toLocaleDateString()}</td>
+                    <td className="cell-name">{s.customerName || "—"}</td>
+                    <td className="mono">{s.customerPhone || "—"}</td>
+                    <td className="mono">#{s.id.slice(-6).toUpperCase()}</td>
+                    <td className="mono">{money(s.total)}</td>
+                    <td><Tag tone={s.debtSettled ? "default" : "danger"}>{s.debtSettled ? "Paid" : "Outstanding"}</Tag></td>
+                    <td>
+                      <div className="row-actions">
+                        <button className="icon-btn" title="View receipt" onClick={() => setViewing(s)}>
+                          <Printer size={14} />
+                        </button>
+                        {!s.debtSettled && (
+                          <button
+                            className="icon-btn"
+                            title="Mark as paid"
+                            disabled={settlingId === s.id}
+                            onClick={() => markPaid(s)}
+                          >
+                            <CheckCircle2 size={14} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -533,6 +700,9 @@ function AddStockForm({ products, adminToken, onChanged, onAuthFail }) {
   const [sellPrice, setSellPrice] = useState("");
   const [quantity, setQuantity] = useState("");
   const [imageDataUrl, setImageDataUrl] = useState(null);
+  const [useRange, setUseRange] = useState(false);
+  const [priceMin, setPriceMin] = useState("");
+  const [priceMax, setPriceMax] = useState("");
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
@@ -552,11 +722,13 @@ function AddStockForm({ products, adminToken, onChanged, onAuthFail }) {
 
   const reset = () => {
     setName(""); setCategory(""); setCostPrice(""); setSellPrice(""); setQuantity(""); setImageDataUrl(null);
+    setUseRange(false); setPriceMin(""); setPriceMax("");
   };
 
   const submit = async (e) => {
     e.preventDefault();
     if (!name || !costPrice || !sellPrice || !quantity) return;
+    if (useRange && (!priceMin || !priceMax)) return;
     setSaving(true);
     setError("");
     try {
@@ -568,6 +740,8 @@ function AddStockForm({ products, adminToken, onChanged, onAuthFail }) {
           sellPrice: Number(sellPrice),
           quantity: Number(quantity),
           imageDataUrl,
+          priceMin: useRange ? priceMin : null,
+          priceMax: useRange ? priceMax : null,
         },
         adminToken
       );
@@ -623,6 +797,28 @@ function AddStockForm({ products, adminToken, onChanged, onAuthFail }) {
             Margin per unit: <strong>{money(Number(sellPrice) - Number(costPrice))}</strong>
             {" "}({(((Number(sellPrice) - Number(costPrice)) / Number(sellPrice || 1)) * 100).toFixed(1)}%)
           </div>
+        )}
+
+        <label className="checkbox-field">
+          <input type="checkbox" checked={useRange} onChange={(e) => setUseRange(e.target.checked)} />
+          <span>This item has a negotiable price range (optional)</span>
+        </label>
+        {useRange && (
+          <div className="field-row" style={{ marginTop: -4 }}>
+            <label className="field">
+              <span>Lowest acceptable price</span>
+              <input type="number" min="0" step="0.01" value={priceMin} onChange={(e) => setPriceMin(e.target.value)} placeholder="0" required={useRange} />
+            </label>
+            <label className="field">
+              <span>Highest price</span>
+              <input type="number" min="0" step="0.01" value={priceMax} onChange={(e) => setPriceMax(e.target.value)} placeholder="0" required={useRange} />
+            </label>
+          </div>
+        )}
+        {useRange && (
+          <p className="form-hint" style={{ marginTop: -8 }}>
+            At the till, the cashier will be asked to enter the actual agreed price within this range instead of using a fixed price.
+          </p>
         )}
 
         <label className="field">
@@ -696,8 +892,15 @@ function Inventory({ products, adminToken, onChanged, onAuthFail }) {
                   <td className="cell-name">{p.name}</td>
                   <td><Tag>{p.category}</Tag></td>
                   <td className="mono">{money(p.costPrice)}</td>
-                  <td className="mono">{money(p.sellPrice)}</td>
-                  <td className="mono">{money(p.sellPrice - p.costPrice)}</td>
+                  <td className="mono">
+                    {priceDisplay(p)}
+                    {p.priceMin != null && <Tag>range</Tag>}
+                  </td>
+                  <td className="mono">
+                    {p.priceMin != null
+                      ? `${money(p.priceMin - p.costPrice)} – ${money(p.priceMax - p.costPrice)}`
+                      : money(p.sellPrice - p.costPrice)}
+                  </td>
                   <td className="mono">
                     {p.quantity}
                     {p.quantity <= LOW_STOCK && <Tag tone="danger">low</Tag>}
@@ -747,6 +950,9 @@ function EditProductModal({ product, adminToken, onClose, onSaved, onAuthFail })
   const [sellPrice, setSellPrice] = useState(String(product.sellPrice));
   const [quantity, setQuantity] = useState(String(product.quantity));
   const [imageDataUrl, setImageDataUrl] = useState(product.imageDataUrl);
+  const [useRange, setUseRange] = useState(product.priceMin != null && product.priceMax != null);
+  const [priceMin, setPriceMin] = useState(product.priceMin != null ? String(product.priceMin) : "");
+  const [priceMax, setPriceMax] = useState(product.priceMax != null ? String(product.priceMax) : "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -761,6 +967,7 @@ function EditProductModal({ product, adminToken, onClose, onSaved, onAuthFail })
   const submit = async (e) => {
     e.preventDefault();
     if (!name || costPrice === "" || sellPrice === "" || quantity === "") return;
+    if (useRange && (!priceMin || !priceMax)) return;
     setSaving(true);
     setError("");
     try {
@@ -773,6 +980,8 @@ function EditProductModal({ product, adminToken, onClose, onSaved, onAuthFail })
           sellPrice: Number(sellPrice),
           quantity: Number(quantity),
           imageDataUrl,
+          priceMin: useRange ? priceMin : null,
+          priceMax: useRange ? priceMax : null,
         },
         adminToken
       );
@@ -816,6 +1025,23 @@ function EditProductModal({ product, adminToken, onClose, onSaved, onAuthFail })
           </label>
         </div>
 
+        <label className="checkbox-field">
+          <input type="checkbox" checked={useRange} onChange={(e) => setUseRange(e.target.checked)} />
+          <span>This item has a negotiable price range (optional)</span>
+        </label>
+        {useRange && (
+          <div className="field-row" style={{ marginTop: -4 }}>
+            <label className="field">
+              <span>Lowest acceptable price</span>
+              <input type="number" min="0" step="0.01" value={priceMin} onChange={(e) => setPriceMin(e.target.value)} required={useRange} />
+            </label>
+            <label className="field">
+              <span>Highest price</span>
+              <input type="number" min="0" step="0.01" value={priceMax} onChange={(e) => setPriceMax(e.target.value)} required={useRange} />
+            </label>
+          </div>
+        )}
+
         <label className="field">
           <span>Product photo</span>
           <div className="image-upload">
@@ -847,6 +1073,8 @@ function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCa
   const [receipt, setReceipt] = useState(null);
   const [checkingOut, setCheckingOut] = useState(false);
   const [error, setError] = useState("");
+  const [pricePromptProduct, setPricePromptProduct] = useState(null); // product awaiting a chosen price
+  const [showCheckout, setShowCheckout] = useState(false);
 
   if (!cashierToken) {
     return <CashierLogin loginCashier={loginCashier} />;
@@ -856,16 +1084,35 @@ function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCa
     (p) => p.name.toLowerCase().includes(q.toLowerCase()) || p.category.toLowerCase().includes(q.toLowerCase())
   );
 
-  const addToCart = (p) => {
-    if (p.quantity <= 0) return;
+  const addItemToCart = (p, chosenPrice) => {
     setCart((prev) => {
       const existing = prev.find((c) => c.productId === p.id);
       if (existing) {
         if (existing.qty >= p.quantity) return prev;
         return prev.map((c) => (c.productId === p.id ? { ...c, qty: c.qty + 1 } : c));
       }
-      return [...prev, { productId: p.id, name: p.name, sellPrice: p.sellPrice, qty: 1, stock: p.quantity }];
+      return [
+        ...prev,
+        {
+          productId: p.id,
+          name: p.name,
+          sellPrice: chosenPrice,
+          qty: 1,
+          stock: p.quantity,
+          priceMin: p.priceMin,
+          priceMax: p.priceMax,
+        },
+      ];
     });
+  };
+
+  const handleTapProduct = (p) => {
+    if (p.quantity <= 0) return;
+    if (p.priceMin != null && p.priceMax != null) {
+      setPricePromptProduct(p);
+    } else {
+      addItemToCart(p, p.sellPrice);
+    }
   };
 
   const changeQty = (id, delta) => {
@@ -876,21 +1123,34 @@ function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCa
     );
   };
 
+  const updateCartPrice = (id, newPrice) => {
+    setCart((prev) => prev.map((c) => (c.productId === id ? { ...c, sellPrice: newPrice } : c)));
+  };
+
   const removeItem = (id) => setCart((prev) => prev.filter((c) => c.productId !== id));
 
   const total = cart.reduce((s, c) => s + c.sellPrice * c.qty, 0);
 
-  const checkout = async () => {
-    if (cart.length === 0 || checkingOut) return;
+  const completeSale = async ({ paymentMethod, customerName, customerPhone }) => {
     setCheckingOut(true);
     setError("");
     try {
-      const sale = await api.createSale(cart.map((c) => ({ productId: c.productId, qty: c.qty })), cashierToken);
+      const sale = await api.createSale(
+        {
+          items: cart.map((c) => ({ productId: c.productId, qty: c.qty, unitPrice: c.priceMin != null ? c.sellPrice : undefined })),
+          paymentMethod,
+          customerName,
+          customerPhone,
+        },
+        cashierToken
+      );
       setReceipt(sale);
       setCart([]);
+      setShowCheckout(false);
       await onChanged();
     } catch (err) {
       setError(err.message || "Could not complete the sale.");
+      setShowCheckout(false);
     } finally {
       setCheckingOut(false);
     }
@@ -908,12 +1168,13 @@ function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCa
         ) : (
           <div className="product-grid">
             {filtered.map((p) => (
-              <button key={p.id} className="price-tag" onClick={() => addToCart(p)} disabled={p.quantity <= 0}>
+              <button key={p.id} className="price-tag" onClick={() => handleTapProduct(p)} disabled={p.quantity <= 0}>
                 <span className="tag-hole" />
                 <ProductThumb src={p.imageDataUrl} size={64} />
                 <div className="tag-name">{p.name}</div>
                 <div className="tag-cat">{p.category}</div>
-                <div className="tag-price">{money(p.sellPrice)}</div>
+                <div className="tag-price">{priceDisplay(p)}</div>
+                {p.priceMin != null && <div className="tag-negotiable">Negotiable</div>}
                 <div className={`tag-stock ${p.quantity <= LOW_STOCK ? "low" : ""}`}>
                   {p.quantity > 0 ? `${p.quantity} in stock` : "Out of stock"}
                 </div>
@@ -932,7 +1193,18 @@ function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCa
           <div className="cart-items">
             {cart.map((c) => (
               <div className="cart-item" key={c.productId}>
-                <div className="cart-item-name">{c.name}</div>
+                <div className="cart-item-name">
+                  {c.name}
+                  {c.priceMin != null && (
+                    <button
+                      type="button"
+                      className="cart-edit-price"
+                      onClick={() => setPricePromptProduct({ id: c.productId, name: c.name, priceMin: c.priceMin, priceMax: c.priceMax, quantity: c.stock, _editing: c })}
+                    >
+                      <Pencil size={11} /> {money(c.sellPrice)}
+                    </button>
+                  )}
+                </div>
                 <div className="cart-item-controls">
                   <button onClick={() => changeQty(c.productId, -1)}><Minus size={13} /></button>
                   <span className="mono">{c.qty}</span>
@@ -949,12 +1221,128 @@ function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCa
           <span className="mono cart-total">{money(total)}</span>
         </div>
         {error && <div className="pin-error" style={{ marginBottom: 10 }}>{error}</div>}
-        <button className="btn btn-primary" style={{ width: "100%" }} disabled={cart.length === 0 || checkingOut} onClick={checkout}>
-          {checkingOut ? "Processing…" : "Checkout & print receipt"}
+        <button className="btn btn-primary" style={{ width: "100%" }} disabled={cart.length === 0 || checkingOut} onClick={() => setShowCheckout(true)}>
+          {checkingOut ? "Processing…" : "Checkout"}
         </button>
       </div>
 
+      {pricePromptProduct && (
+        <PricePromptModal
+          product={pricePromptProduct}
+          onCancel={() => setPricePromptProduct(null)}
+          onConfirm={(price) => {
+            if (pricePromptProduct._editing) {
+              updateCartPrice(pricePromptProduct._editing.productId, price);
+            } else {
+              addItemToCart(pricePromptProduct, price);
+            }
+            setPricePromptProduct(null);
+          }}
+        />
+      )}
+
+      {showCheckout && (
+        <CheckoutModal
+          total={total}
+          checkingOut={checkingOut}
+          onCancel={() => setShowCheckout(false)}
+          onConfirm={completeSale}
+        />
+      )}
+
       {receipt && <ReceiptModal sale={receipt} onClose={() => setReceipt(null)} />}
+    </div>
+  );
+}
+
+function PricePromptModal({ product, onCancel, onConfirm }) {
+  const mid = Math.round((Number(product.priceMin) + Number(product.priceMax)) / 2);
+  const [price, setPrice] = useState(String(product._editing ? product._editing.sellPrice : mid));
+  const [error, setError] = useState("");
+
+  const confirm = (e) => {
+    e.preventDefault();
+    const n = Number(price);
+    if (Number.isNaN(n) || n < product.priceMin || n > product.priceMax) {
+      setError(`Enter a price between ${money(product.priceMin)} and ${money(product.priceMax)}.`);
+      return;
+    }
+    onConfirm(n);
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <form className="card form-card" style={{ maxWidth: 320 }} onClick={(e) => e.stopPropagation()} onSubmit={confirm}>
+        <div className="form-title">{product.name}</div>
+        <p className="form-hint">This item has a negotiable price. Enter what the customer is paying — must be between {money(product.priceMin)} and {money(product.priceMax)}.</p>
+        <label className="field">
+          <span>Agreed price</span>
+          <input
+            autoFocus
+            type="number"
+            min={product.priceMin}
+            max={product.priceMax}
+            step="0.01"
+            value={price}
+            onChange={(e) => { setPrice(e.target.value); setError(""); }}
+          />
+        </label>
+        {error && <div className="pin-error" style={{ marginBottom: 10 }}>{error}</div>}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" style={{ flex: 1 }} type="submit">Add to sale</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function CheckoutModal({ total, checkingOut, onCancel, onConfirm }) {
+  const [method, setMethod] = useState("cash");
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+
+  const confirm = (e) => {
+    e.preventDefault();
+    onConfirm({ paymentMethod: method, customerName, customerPhone });
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <form className="card form-card" style={{ maxWidth: 360 }} onClick={(e) => e.stopPropagation()} onSubmit={confirm}>
+        <div className="form-title">Complete sale</div>
+        <div className="checkout-total">{money(total)}</div>
+
+        <div className="field" style={{ marginTop: 8 }}>
+          <span>How is the customer paying?</span>
+          <div className="payment-method-row">
+            <button type="button" className={`payment-btn ${method === "cash" ? "active" : ""}`} onClick={() => setMethod("cash")}>Cash</button>
+            <button type="button" className={`payment-btn ${method === "till" ? "active" : ""}`} onClick={() => setMethod("till")}>Till</button>
+            <button type="button" className={`payment-btn payment-btn-debt ${method === "debt" ? "active" : ""}`} onClick={() => setMethod("debt")}>Debt</button>
+          </div>
+        </div>
+
+        {method === "debt" && (
+          <>
+            <p className="form-hint">Recording who owes this helps you follow up later — both fields are optional.</p>
+            <label className="field">
+              <span>Customer name (optional)</span>
+              <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="e.g. John Mwangi" />
+            </label>
+            <label className="field">
+              <span>Phone number (optional)</span>
+              <input value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="e.g. 07xx xxx xxx" />
+            </label>
+          </>
+        )}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" style={{ flex: 1 }} type="submit" disabled={checkingOut}>
+            {checkingOut ? "Processing…" : "Complete sale"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -1008,6 +1396,7 @@ function CashierLogin({ loginCashier }) {
 
 function ReceiptModal({ sale, onClose }) {
   const dt = new Date(sale.timestamp);
+  const isDebt = sale.paymentMethod === "debt";
   return (
     <div className="modal-backdrop">
       <div className="receipt-shell">
@@ -1035,6 +1424,16 @@ function ReceiptModal({ sale, onClose }) {
               <span>TOTAL</span>
               <span className="mono">{money(sale.total)}</span>
             </div>
+            <div className="receipt-payment">
+              {sale.paymentMethod === "cash" && "Paid in cash"}
+              {sale.paymentMethod === "till" && "Paid via till"}
+              {isDebt && "ON DEBT — NOT YET PAID"}
+            </div>
+            {isDebt && (sale.customerName || sale.customerPhone) && (
+              <div className="receipt-meta">
+                {sale.customerName || "—"}{sale.customerPhone ? ` · ${sale.customerPhone}` : ""}
+              </div>
+            )}
             <div className="receipt-footer">Thank you for shopping with us</div>
           </div>
         </div>
