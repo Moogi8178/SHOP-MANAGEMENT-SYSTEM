@@ -32,6 +32,21 @@ async function initDb() {
     );
   `);
 
+  // Safe to re-run: adds cashier attribution to sales created before this feature existed.
+  await pool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS cashier_id TEXT;`);
+  await pool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS cashier_name TEXT;`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cashiers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT true,
+      created_at BIGINT NOT NULL
+    );
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sale_items (
       id SERIAL PRIMARY KEY,
