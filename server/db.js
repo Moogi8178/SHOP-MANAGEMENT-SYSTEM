@@ -70,6 +70,22 @@ async function initDb() {
   `);
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id);`);
+
+  // Returns: track how much of each sale line has been returned, and the
+  // running refunded amount on the sale, without deleting the original record.
+  await pool.query(`ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS returned_qty INTEGER NOT NULL DEFAULT 0;`);
+  await pool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS refunded_amount NUMERIC NOT NULL DEFAULT 0;`);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS petty_cash (
+      id TEXT PRIMARY KEY,
+      amount NUMERIC NOT NULL,
+      reason TEXT NOT NULL,
+      cashier_id TEXT,
+      cashier_name TEXT NOT NULL,
+      ts BIGINT NOT NULL
+    );
+  `);
 }
 
 module.exports = { pool, initDb };
