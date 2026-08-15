@@ -48,6 +48,13 @@ export const api = {
       headers: { Authorization: `Bearer ${token}` },
     }).then(handle),
 
+  processReturn: (saleId, items, token) =>
+    fetch(`/api/sales/${saleId}/return`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ items }),
+    }).then(handle),
+
   adminLogin: (pin) =>
     fetch("/api/admin/login", {
       method: "POST",
@@ -76,5 +83,15 @@ export const api = {
     fetch(`/api/cashiers/${id}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` },
+    }).then(handle),
+
+  listPettyCash: (token) =>
+    fetch("/api/pettycash", { headers: { Authorization: `Bearer ${token}` } }).then(handle),
+
+  createPettyCash: (payload, cashierToken) =>
+    fetch("/api/pettycash", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cashierToken}` },
+      body: JSON.stringify(payload),
     }).then(handle),
 };
