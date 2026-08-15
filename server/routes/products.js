@@ -5,6 +5,25 @@ const { requireAdmin } = require("../auth");
 
 const router = express.Router();
 
+function toNullableNumber(v) {
+  if (v === undefined || v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isNaN(n) ? null : n;
+}
+
+// Returns { ok: true, min, max } or { ok: false, error }.
+function parsePriceRange(priceMin, priceMax) {
+  const min = toNullableNumber(priceMin);
+  const max = toNullableNumber(priceMax);
+  if ((min != null && max == null) || (min == null && max != null)) {
+    return { ok: false, error: "Provide both a minimum and maximum price, or leave both blank." };
+  }
+  if (min != null && max != null && min > max) {
+    return { ok: false, error: "Minimum price can't be higher than the maximum price." };
+  }
+  return { ok: true, min, max };
+}
+
 function rowToProduct(r) {
   return {
     id: r.id,
@@ -12,6 +31,8 @@ function rowToProduct(r) {
     category: r.category,
     costPrice: Number(r.cost_price),
     sellPrice: Number(r.sell_price),
+    priceMin: r.price_min != null ? Number(r.price_min) : null,
+    priceMax: r.price_max != null ? Number(r.price_max) : null,
     quantity: r.quantity,
     imageDataUrl: r.image_data_url,
     dateAdded: Number(r.date_added),
@@ -26,11 +47,14 @@ router.get("/", async (_req, res) => {
 
 // Add or restock a product. Admin only.
 router.post("/", requireAdmin, async (req, res) => {
-  const { name, category, costPrice, sellPrice, quantity, imageDataUrl } = req.body || {};
+  const { name, category, costPrice, sellPrice, quantity, imageDataUrl, priceMin, priceMax } = req.body || {};
 
   if (!name || costPrice == null || sellPrice == null || !quantity || Number(quantity) <= 0) {
     return res.status(400).json({ error: "name, costPrice, sellPrice and a positive quantity are required." });
   }
+
+  const range = parsePriceRange(priceMin, priceMax);
+  if (!range.ok) return res.status(400).json({ error: range.error });
 
   const now = Date.now();
   const { rows: existingRows } = await pool.query(
@@ -46,19 +70,20 @@ router.post("/", requireAdmin, async (req, res) => {
        SET cost_price = $1, sell_price = $2, quantity = $3,
            category = COALESCE(NULLIF($4, ''), category),
            image_data_url = COALESCE($5, image_data_url),
-           last_restocked = $6
-       WHERE id = $7
+           price_min = $6, price_max = $7,
+           last_restocked = $8
+       WHERE id = $9
        RETURNING *`,
-      [Number(costPrice), Number(sellPrice), newQty, category || "", imageDataUrl || null, now, existing.id]
+      [Number(costPrice), Number(sellPrice), newQty, category || "", imageDataUrl || null, range.min, range.max, now, existing.id]
     );
     return res.json(rowToProduct(rows[0]));
   }
 
   const id = crypto.randomUUID();
   const { rows } = await pool.query(
-    `INSERT INTO products (id, name, category, cost_price, sell_price, quantity, image_data_url, date_added, last_restocked)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-    [id, name.trim(), category?.trim() || "General", Number(costPrice), Number(sellPrice), Number(quantity), imageDataUrl || null, now, now]
+    `INSERT INTO products (id, name, category, cost_price, sell_price, price_min, price_max, quantity, image_data_url, date_added, last_restocked)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+    [id, name.trim(), category?.trim() || "General", Number(costPrice), Number(sellPrice), range.min, range.max, Number(quantity), imageDataUrl || null, now, now]
   );
   res.status(201).json(rowToProduct(rows[0]));
 });
@@ -66,11 +91,14 @@ router.post("/", requireAdmin, async (req, res) => {
 // Edit a product's details directly (full replace, not additive). Admin only.
 router.put("/:id", requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const { name, category, costPrice, sellPrice, quantity, imageDataUrl } = req.body || {};
+  const { name, category, costPrice, sellPrice, quantity, imageDataUrl, priceMin, priceMax } = req.body || {};
 
   if (!name || costPrice == null || sellPrice == null || quantity == null || Number(quantity) < 0) {
     return res.status(400).json({ error: "name, costPrice, sellPrice and a non-negative quantity are required." });
   }
+
+  const range = parsePriceRange(priceMin, priceMax);
+  if (!range.ok) return res.status(400).json({ error: range.error });
 
   const { rows: existingRows } = await pool.query("SELECT * FROM products WHERE id = $1", [id]);
   if (existingRows.length === 0) {
@@ -80,10 +108,11 @@ router.put("/:id", requireAdmin, async (req, res) => {
   const { rows } = await pool.query(
     `UPDATE products
      SET name = $1, category = $2, cost_price = $3, sell_price = $4, quantity = $5,
-         image_data_url = COALESCE($6, image_data_url)
-     WHERE id = $7
+         image_data_url = COALESCE($6, image_data_url),
+         price_min = $7, price_max = $8
+     WHERE id = $9
      RETURNING *`,
-    [name.trim(), category?.trim() || "General", Number(costPrice), Number(sellPrice), Number(quantity), imageDataUrl || null, id]
+    [name.trim(), category?.trim() || "General", Number(costPrice), Number(sellPrice), Number(quantity), imageDataUrl || null, range.min, range.max, id]
   );
   res.json(rowToProduct(rows[0]));
 });
