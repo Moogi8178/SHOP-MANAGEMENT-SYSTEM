@@ -63,4 +63,39 @@ router.post("/", requireAdmin, async (req, res) => {
   res.status(201).json(rowToProduct(rows[0]));
 });
 
+// Edit a product's details directly (full replace, not additive). Admin only.
+router.put("/:id", requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { name, category, costPrice, sellPrice, quantity, imageDataUrl } = req.body || {};
+
+  if (!name || costPrice == null || sellPrice == null || quantity == null || Number(quantity) < 0) {
+    return res.status(400).json({ error: "name, costPrice, sellPrice and a non-negative quantity are required." });
+  }
+
+  const { rows: existingRows } = await pool.query("SELECT * FROM products WHERE id = $1", [id]);
+  if (existingRows.length === 0) {
+    return res.status(404).json({ error: "Product not found." });
+  }
+
+  const { rows } = await pool.query(
+    `UPDATE products
+     SET name = $1, category = $2, cost_price = $3, sell_price = $4, quantity = $5,
+         image_data_url = COALESCE($6, image_data_url)
+     WHERE id = $7
+     RETURNING *`,
+    [name.trim(), category?.trim() || "General", Number(costPrice), Number(sellPrice), Number(quantity), imageDataUrl || null, id]
+  );
+  res.json(rowToProduct(rows[0]));
+});
+
+// Delete a product. Admin only.
+router.delete("/:id", requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { rowCount } = await pool.query("DELETE FROM products WHERE id = $1", [id]);
+  if (rowCount === 0) {
+    return res.status(404).json({ error: "Product not found." });
+  }
+  res.json({ ok: true });
+});
+
 module.exports = router;
