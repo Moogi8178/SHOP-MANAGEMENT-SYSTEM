@@ -7,6 +7,7 @@ import {
   Hammer, Wrench, Package, TrendingUp, Plus, Search, ShoppingCart,
   Printer, X, AlertTriangle, Lock, LogOut, Boxes, DollarSign, Minus,
   ImagePlus, Trash2, CheckCircle2, RefreshCw, Pencil, User, UserPlus, History,
+  Wallet, RotateCcw,
 } from "lucide-react";
 import { api } from "./api";
 
@@ -231,6 +232,9 @@ function AdminPanel({ products, sales, adminToken, onChanged, onAuthFail }) {
         <button className={tab === "cashiers" ? "active" : ""} onClick={() => setTab("cashiers")}>
           <UserPlus size={15} /> Cashiers
         </button>
+        <button className={tab === "pettycash" ? "active" : ""} onClick={() => setTab("pettycash")}>
+          <Wallet size={15} /> Petty Cash
+        </button>
       </div>
 
       {tab === "dashboard" && <Dashboard products={products} sales={sales} />}
@@ -240,18 +244,20 @@ function AdminPanel({ products, sales, adminToken, onChanged, onAuthFail }) {
       {tab === "inventory" && (
         <Inventory products={products} adminToken={adminToken} onChanged={onChanged} onAuthFail={onAuthFail} />
       )}
-      {tab === "sales" && <SalesHistory sales={sales} />}
+      {tab === "sales" && <SalesHistory sales={sales} adminToken={adminToken} onChanged={onChanged} onAuthFail={onAuthFail} />}
       {tab === "debts" && <Debts sales={sales} adminToken={adminToken} onChanged={onChanged} onAuthFail={onAuthFail} />}
       {tab === "cashiers" && <Cashiers adminToken={adminToken} onAuthFail={onAuthFail} />}
+      {tab === "pettycash" && <PettyCash adminToken={adminToken} onAuthFail={onAuthFail} />}
     </div>
   );
 }
 
-function SalesHistory({ sales }) {
+function SalesHistory({ sales, adminToken, onChanged, onAuthFail }) {
   const [q, setQ] = useState("");
   const [dateFilter, setDateFilter] = useState(todayKey());
   const [showAllDates, setShowAllDates] = useState(false);
   const [viewing, setViewing] = useState(null);
+  const [returning, setReturning] = useState(null);
 
   const sorted = [...sales].sort((a, b) => b.timestamp - a.timestamp);
   const dateFiltered = showAllDates ? sorted : sorted.filter((s) => dateKey(s.timestamp) === dateFilter);
@@ -272,6 +278,8 @@ function SalesHistory({ sales }) {
     }
     return s;
   }, [filtered]);
+
+  const canReturn = (s) => s.items.some((it) => it.qty - (it.returnedQty || 0) > 0);
 
   return (
     <div>
@@ -323,6 +331,7 @@ function SalesHistory({ sales }) {
               {filtered.map((s) => {
                 const dt = new Date(s.timestamp);
                 const itemCount = s.items.reduce((n, it) => n + it.qty, 0);
+                const hasRefund = s.refundedAmount > 0;
                 return (
                   <tr key={s.id}>
                     <td className="mono">{dt.toLocaleDateString()} {dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
@@ -330,11 +339,21 @@ function SalesHistory({ sales }) {
                     <td>{s.cashierName || <span className="empty-note" style={{ padding: 0 }}>—</span>}</td>
                     <td><PaymentBadge method={s.paymentMethod} settled={s.debtSettled} /></td>
                     <td className="mono">{itemCount}</td>
-                    <td className="mono">{money(s.total)}</td>
+                    <td className="mono">
+                      {money(s.netTotal)}
+                      {hasRefund && <div className="refund-note">{money(s.refundedAmount)} returned</div>}
+                    </td>
                     <td>
-                      <button className="icon-btn" title="View / print receipt" onClick={() => setViewing(s)}>
-                        <Printer size={14} />
-                      </button>
+                      <div className="row-actions">
+                        <button className="icon-btn" title="View / print receipt" onClick={() => setViewing(s)}>
+                          <Printer size={14} />
+                        </button>
+                        {canReturn(s) && (
+                          <button className="icon-btn" title="Process a return" onClick={() => setReturning(s)}>
+                            <RotateCcw size={14} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -345,6 +364,106 @@ function SalesHistory({ sales }) {
       )}
 
       {viewing && <ReceiptModal sale={viewing} onClose={() => setViewing(null)} />}
+      {returning && (
+        <ReturnModal
+          sale={returning}
+          adminToken={adminToken}
+          onClose={() => setReturning(null)}
+          onDone={async () => {
+            setReturning(null);
+            await onChanged();
+          }}
+          onAuthFail={onAuthFail}
+        />
+      )}
+    </div>
+  );
+}
+
+function ReturnModal({ sale, adminToken, onClose, onDone, onAuthFail }) {
+  const [qtys, setQtys] = useState(() => Object.fromEntries(sale.items.map((it) => [it.productId, 0])));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const setQty = (productId, val, max) => {
+    const n = Math.max(0, Math.min(max, Math.floor(Number(val) || 0)));
+    setQtys((prev) => ({ ...prev, [productId]: n }));
+  };
+
+  const refundPreview = sale.items.reduce((sum, it) => sum + (qtys[it.productId] || 0) * it.sellPrice, 0);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const items = sale.items
+      .map((it) => ({ productId: it.productId, qty: qtys[it.productId] || 0 }))
+      .filter((l) => l.qty > 0);
+    if (items.length === 0) {
+      setError("Enter a quantity for at least one item.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await api.processReturn(sale.id, items, adminToken);
+      await onDone();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not process this return.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="card form-card" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <div className="form-title">Process a return</div>
+        <p className="form-hint">
+          Ticket #{sale.id.slice(-6).toUpperCase()} — set how many units of each item the customer is returning.
+          Stock is added back automatically and the sale total is reduced.
+        </p>
+
+        <div className="return-items">
+          {sale.items.map((it) => {
+            const remaining = it.qty - (it.returnedQty || 0);
+            return (
+              <div className="return-row" key={it.productId}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{it.name}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-500)" }}>
+                    {remaining} of {it.qty} returnable · {money(it.sellPrice)} each
+                  </div>
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  max={remaining}
+                  step="1"
+                  className="return-qty-input"
+                  value={qtys[it.productId] || 0}
+                  disabled={remaining === 0}
+                  onChange={(e) => setQty(it.productId, e.target.value, remaining)}
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        {refundPreview > 0 && (
+          <div className="margin-preview" style={{ marginTop: 10 }}>
+            Refund total: <strong>{money(refundPreview)}</strong>
+          </div>
+        )}
+
+        {error && <div className="pin-error" style={{ margin: "10px 0" }}>{error}</div>}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" style={{ flex: 1 }} type="submit" disabled={saving}>
+            {saving ? "Processing…" : "Process return"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -376,10 +495,10 @@ function Debts({ sales, adminToken, onChanged, onAuthFail }) {
     );
   });
 
-  const outstandingTotal = debts.filter((s) => !s.debtSettled).reduce((n, s) => n + s.total, 0);
+  const outstandingTotal = debts.filter((s) => !s.debtSettled).reduce((n, s) => n + s.netTotal, 0);
 
   const markPaid = async (s) => {
-    if (!window.confirm(`Mark ${money(s.total)} from ${s.customerName || "this customer"} as paid?`)) return;
+    if (!window.confirm(`Mark ${money(s.netTotal)} from ${s.customerName || "this customer"} as paid?`)) return;
     setSettlingId(s.id);
     setError("");
     try {
@@ -434,7 +553,10 @@ function Debts({ sales, adminToken, onChanged, onAuthFail }) {
                     <td className="cell-name">{s.customerName || "—"}</td>
                     <td className="mono">{s.customerPhone || "—"}</td>
                     <td className="mono">#{s.id.slice(-6).toUpperCase()}</td>
-                    <td className="mono">{money(s.total)}</td>
+                    <td className="mono">
+                      {money(s.netTotal)}
+                      {s.refundedAmount > 0 && <div className="refund-note">{money(s.refundedAmount)} returned</div>}
+                    </td>
                     <td><Tag tone={s.debtSettled ? "default" : "danger"}>{s.debtSettled ? "Paid" : "Outstanding"}</Tag></td>
                     <td>
                       <div className="row-actions">
@@ -567,6 +689,83 @@ function Cashiers({ adminToken, onAuthFail }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function PettyCash({ adminToken, onAuthFail }) {
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [dateFilter, setDateFilter] = useState(todayKey());
+  const [showAllDates, setShowAllDates] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const list = await api.listPettyCash(adminToken);
+      setEntries(list);
+      setError("");
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not load petty cash records.");
+    } finally {
+      setLoading(false);
+    }
+  }, [adminToken, onAuthFail]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = (showAllDates ? entries : entries.filter((e) => dateKey(e.timestamp) === dateFilter))
+    .sort((a, b) => b.timestamp - a.timestamp);
+  const total = filtered.reduce((n, e) => n + e.amount, 0);
+
+  return (
+    <div>
+      <div className="txn-filter-row">
+        {!showAllDates && (
+          <input type="date" className="date-input" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
+        )}
+        <label className="checkbox-field" style={{ marginBottom: 0 }}>
+          <input type="checkbox" checked={showAllDates} onChange={(e) => setShowAllDates(e.target.checked)} />
+          <span>All dates</span>
+        </label>
+        <button className="icon-btn" title="Refresh" onClick={load}><RefreshCw size={14} /></button>
+      </div>
+
+      <div className="kpi-card kpi-highlight" style={{ marginTop: 14, marginBottom: 14, maxWidth: 280 }}>
+        <div className="kpi-label"><Wallet size={14} /> Petty cash spent</div>
+        <div className="kpi-value">{money(total)}</div>
+        <div className="kpi-sub">{filtered.length} entr{filtered.length === 1 ? "y" : "ies"}</div>
+      </div>
+
+      {error && <div className="pin-error" style={{ marginBottom: 10 }}>{error}</div>}
+
+      {loading ? (
+        <EmptyNote text="Loading…" />
+      ) : filtered.length === 0 ? (
+        <EmptyNote text="No petty cash logged for this filter." />
+      ) : (
+        <div className="table-wrap">
+          <table className="inv-table">
+            <thead>
+              <tr><th>Date &amp; time</th><th>Amount</th><th>Used for</th><th>Issued by</th></tr>
+            </thead>
+            <tbody>
+              {filtered.map((e) => {
+                const dt = new Date(e.timestamp);
+                return (
+                  <tr key={e.id}>
+                    <td className="mono">{dt.toLocaleDateString()} {dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
+                    <td className="mono">{money(e.amount)}</td>
+                    <td>{e.reason}</td>
+                    <td>{e.cashierName}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1075,6 +1274,7 @@ function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCa
   const [error, setError] = useState("");
   const [pricePromptProduct, setPricePromptProduct] = useState(null); // product awaiting a chosen price
   const [showCheckout, setShowCheckout] = useState(false);
+  const [showPettyCash, setShowPettyCash] = useState(false);
 
   if (!cashierToken) {
     return <CashierLogin loginCashier={loginCashier} />;
@@ -1186,7 +1386,12 @@ function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCa
 
       <div className="cart-panel">
         <div className="cart-head"><ShoppingCart size={16} /> Current sale</div>
-        <div className="cart-cashier">Served by {cashierName}</div>
+        <div className="cart-cashier-row">
+          <span className="cart-cashier">Served by {cashierName}</span>
+          <button type="button" className="cart-pettycash-btn" onClick={() => setShowPettyCash(true)}>
+            <Wallet size={12} /> Petty cash
+          </button>
+        </div>
         {cart.length === 0 ? (
           <EmptyNote text="Tap a product to add it to the sale." />
         ) : (
@@ -1251,6 +1456,66 @@ function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCa
       )}
 
       {receipt && <ReceiptModal sale={receipt} onClose={() => setReceipt(null)} />}
+      {showPettyCash && (
+        <PettyCashModal cashierToken={cashierToken} cashierName={cashierName} onClose={() => setShowPettyCash(false)} />
+      )}
+    </div>
+  );
+}
+
+function PettyCashModal({ cashierToken, cashierName, onClose }) {
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!amount || !reason) return;
+    setSaving(true);
+    setError("");
+    try {
+      await api.createPettyCash({ amount: Number(amount), reason: reason.trim() }, cashierToken);
+      setDone(true);
+      setTimeout(onClose, 1200);
+    } catch (err) {
+      setError(err.message || "Could not log this expense.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="card form-card" style={{ maxWidth: 340 }} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <div className="form-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Wallet size={18} /> Log petty cash
+        </div>
+        <p className="form-hint">Recorded under {cashierName}. Shows up on the admin's Petty Cash page.</p>
+
+        <label className="field">
+          <span>Amount</span>
+          <input autoFocus type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+        </label>
+        <label className="field">
+          <span>What was it used for?</span>
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Fuel for delivery, tea for staff" required />
+        </label>
+
+        {error && <div className="pin-error" style={{ marginBottom: 10 }}>{error}</div>}
+
+        {done ? (
+          <div className="save-confirm"><CheckCircle2 size={15} /> Logged</div>
+        ) : (
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" style={{ flex: 1 }} type="submit" disabled={saving}>
+              {saving ? "Saving…" : "Log expense"}
+            </button>
+          </div>
+        )}
+      </form>
     </div>
   );
 }
