@@ -75,6 +75,11 @@ input{ font-family:inherit; }
 .inv-table td{ padding:9px 12px; border-bottom:1px solid var(--concrete-100); font-size:13.5px; }
 .inv-table tr.row-low{ background:#FDF6EE; }
 .cell-name{ font-weight:600; }
+.row-actions{ display:flex; gap:6px; justify-content:flex-end; }
+.icon-btn{ background:var(--concrete-100); border:1px solid var(--concrete-200); border-radius:6px; width:28px; height:28px; display:flex; align-items:center; justify-content:center; color:var(--ink-900); }
+.icon-btn:disabled{ opacity:0.5; }
+.icon-btn-danger{ color:var(--rust-600); }
+.icon-btn-danger:hover{ background:#FCE4DA; border-color:#F0B79B; }
 
 .thumb{ border-radius:6px; object-fit:cover; display:block; }
 .thumb-empty{ background:var(--concrete-200); color:var(--ink-500); display:flex; align-items:center; justify-content:center; }
