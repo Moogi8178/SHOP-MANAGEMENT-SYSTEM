@@ -20,6 +20,19 @@ export const api = {
       body: JSON.stringify(payload),
     }).then(handle),
 
+  updateProduct: (id, payload, token) =>
+    fetch(`/api/products/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    }).then(handle),
+
+  deleteProduct: (id, token) =>
+    fetch(`/api/products/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(handle),
+
   getSales: () => fetch("/api/sales").then(handle),
 
   createSale: (items) =>
