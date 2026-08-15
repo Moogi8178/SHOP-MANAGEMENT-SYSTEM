@@ -1,16 +1,25 @@
 const express = require("express");
 const crypto = require("crypto");
 const { pool } = require("../db");
+const { requireCashierOrAdmin } = require("../auth");
 
 const router = express.Router();
 
+// Admin-only in practice (mounted behind the admin UI), but left open at the
+// route level since sales history has no sensitive write actions.
 router.get("/", async (_req, res) => {
-  const { rows: sales } = await pool.query("SELECT * FROM sales ORDER BY ts ASC");
+  const { rows: sales } = await pool.query("SELECT * FROM sales ORDER BY ts DESC");
   const { rows: items } = await pool.query("SELECT * FROM sale_items ORDER BY id ASC");
 
   const bySale = {};
   for (const s of sales) {
-    bySale[s.id] = { id: s.id, timestamp: Number(s.ts), total: Number(s.total), items: [] };
+    bySale[s.id] = {
+      id: s.id,
+      timestamp: Number(s.ts),
+      total: Number(s.total),
+      cashierName: s.cashier_name || null,
+      items: [],
+    };
   }
   for (const it of items) {
     if (bySale[it.sale_id]) {
@@ -27,12 +36,16 @@ router.get("/", async (_req, res) => {
 });
 
 // Body: { items: [{ productId, qty }] }
-// Server looks up authoritative prices & stock, decrements inventory, records the sale.
-router.post("/", async (req, res) => {
+// Requires a logged-in cashier (or admin). Server looks up authoritative
+// prices & stock, decrements inventory, and records who made the sale.
+router.post("/", requireCashierOrAdmin, async (req, res) => {
   const { items } = req.body || {};
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: "Cart is empty." });
   }
+
+  const cashierId = req.auth.role === "cashier" ? req.auth.cashierId : null;
+  const cashierName = req.auth.role === "cashier" ? req.auth.name : "Admin";
 
   const client = await pool.connect();
   try {
@@ -60,7 +73,10 @@ router.post("/", async (req, res) => {
 
     const saleId = crypto.randomUUID();
     const ts = Date.now();
-    await client.query("INSERT INTO sales (id, ts, total) VALUES ($1,$2,$3)", [saleId, ts, total]);
+    await client.query(
+      "INSERT INTO sales (id, ts, total, cashier_id, cashier_name) VALUES ($1,$2,$3,$4,$5)",
+      [saleId, ts, total, cashierId, cashierName]
+    );
 
     for (const it of saleItems) {
       await client.query(
@@ -71,7 +87,7 @@ router.post("/", async (req, res) => {
     }
 
     await client.query("COMMIT");
-    res.status(201).json({ id: saleId, timestamp: ts, total, items: saleItems });
+    res.status(201).json({ id: saleId, timestamp: ts, total, cashierName, items: saleItems });
   } catch (err) {
     await client.query("ROLLBACK");
     const status = err.status || 500;
