@@ -94,4 +94,21 @@ export const api = {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cashierToken}` },
       body: JSON.stringify(payload),
     }).then(handle),
+
+  listBorrows: (token) =>
+    fetch("/api/borrows", { headers: { Authorization: `Bearer ${token}` } }).then(handle),
+
+  createBorrow: (payload, cashierToken) =>
+    fetch("/api/borrows", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cashierToken}` },
+      body: JSON.stringify(payload),
+    }).then(handle),
+
+  returnBorrowItems: (id, items, token) =>
+    fetch(`/api/borrows/${id}/return`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ items }),
+    }).then(handle),
 };
