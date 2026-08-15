@@ -36,6 +36,16 @@ async function initDb() {
   await pool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS cashier_id TEXT;`);
   await pool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS cashier_name TEXT;`);
 
+  // Payment method + debt tracking.
+  await pool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';`);
+  await pool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS customer_name TEXT;`);
+  await pool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS customer_phone TEXT;`);
+  await pool.query(`ALTER TABLE sales ADD COLUMN IF NOT EXISTS debt_settled BOOLEAN NOT NULL DEFAULT true;`);
+
+  // Optional negotiable price range per product.
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS price_min NUMERIC;`);
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS price_max NUMERIC;`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS cashiers (
       id TEXT PRIMARY KEY,
