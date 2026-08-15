@@ -27,7 +27,7 @@ input{ font-family:inherit; }
 .banner-error{ background:#FCE4DA; color:var(--rust-600); border:1px solid #F0B79B; border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:13px; display:flex; align-items:center; gap:10px; }
 .banner-error button{ background:var(--rust-600); color:#fff; border:none; border-radius:6px; padding:5px 10px; font-size:12px; }
 
-.subnav{ display:flex; gap:8px; margin-bottom:18px; }
+.subnav{ display:flex; gap:8px; margin-bottom:18px; flex-wrap:wrap; }
 .subnav button{ display:flex; align-items:center; gap:6px; background:#fff; border:1px solid var(--concrete-200); padding:9px 15px; border-radius:8px; font-size:13px; font-weight:500; color:var(--ink-500); }
 .subnav button.active{ background:var(--steel-900); color:#fff; border-color:var(--steel-900); }
 
@@ -59,6 +59,8 @@ input{ font-family:inherit; }
 .field-note{ font-weight:400; color:var(--forest-600); font-size:11.5px; }
 .field-row{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
 .margin-preview{ background:var(--concrete-100); border-radius:7px; padding:8px 12px; font-size:12.5px; margin-bottom:14px; }
+.checkbox-field{ display:flex; align-items:center; gap:8px; font-size:13px; font-weight:500; margin-bottom:14px; color:var(--ink-900); }
+.checkbox-field input{ width:16px; height:16px; }
 .image-upload{ display:flex; align-items:center; gap:12px; }
 .save-confirm{ display:flex; align-items:center; gap:6px; color:var(--forest-600); font-size:12.5px; margin-top:10px; }
 
@@ -95,6 +97,7 @@ input{ font-family:inherit; }
 .tag-name{ font-weight:600; font-size:13px; margin-top:6px; }
 .tag-cat{ font-size:11px; color:var(--ink-500); }
 .tag-price{ font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:15px; color:var(--forest-600); margin-top:2px; }
+.tag-negotiable{ font-size:9.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--rust-600); font-weight:700; }
 .tag-stock{ font-size:10.5px; color:var(--ink-500); }
 .tag-stock.low{ color:var(--rust-600); font-weight:600; }
 
@@ -103,7 +106,8 @@ input{ font-family:inherit; }
 .cart-cashier{ font-size:11.5px; color:var(--ink-500); margin-bottom:10px; }
 .cart-items{ display:flex; flex-direction:column; gap:10px; max-height:340px; overflow-y:auto; margin-bottom:10px; }
 .cart-item{ display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--concrete-100); padding-bottom:8px; }
-.cart-item-name{ flex:1; font-size:12.5px; }
+.cart-item-name{ flex:1; font-size:12.5px; display:flex; flex-direction:column; gap:2px; }
+.cart-edit-price{ align-self:flex-start; display:flex; align-items:center; gap:4px; background:none; border:none; padding:0; font-size:11px; color:var(--forest-600); font-weight:600; text-decoration:underline; }
 .cart-item-controls{ display:flex; align-items:center; gap:5px; }
 .cart-item-controls button{ background:var(--concrete-100); border:none; border-radius:5px; width:22px; height:22px; display:flex; align-items:center; justify-content:center; }
 .cart-item-controls button:disabled{ opacity:0.4; }
@@ -132,8 +136,17 @@ input{ font-family:inherit; }
 .receipt-line-qty{ color:var(--ink-500); }
 .receipt-line-total{ text-align:right; }
 .receipt-total-row{ display:flex; justify-content:space-between; font-weight:700; font-size:15px; }
+.receipt-payment{ text-align:center; font-size:11.5px; font-weight:700; letter-spacing:0.03em; margin-top:10px; color:var(--forest-600); }
 .receipt-footer{ text-align:center; font-size:11px; color:var(--ink-500); margin-top:14px; }
 .receipt-actions{ display:flex; gap:8px; }
+
+.txn-filter-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:0; }
+.date-input{ border:1px solid var(--concrete-200); border-radius:8px; padding:9px 12px; font-size:13px; font-family:'IBM Plex Mono',monospace; background:#fff; }
+.checkout-total{ font-family:'IBM Plex Mono',monospace; font-size:26px; font-weight:700; text-align:center; margin-bottom:6px; }
+.payment-method-row{ display:flex; gap:8px; margin-top:4px; }
+.payment-btn{ flex:1; background:#fff; border:1px solid var(--concrete-200); border-radius:8px; padding:10px; font-size:13px; font-weight:600; color:var(--ink-500); }
+.payment-btn.active{ background:var(--steel-900); color:#fff; border-color:var(--steel-900); }
+.payment-btn-debt.active{ background:var(--rust-600); border-color:var(--rust-600); }
 
 @media print{
   body *{ visibility:hidden; }
