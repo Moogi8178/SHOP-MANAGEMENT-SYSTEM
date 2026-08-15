@@ -6,7 +6,7 @@ import {
 import {
   Hammer, Wrench, Package, TrendingUp, Plus, Search, ShoppingCart,
   Printer, X, AlertTriangle, Lock, LogOut, Boxes, DollarSign, Minus,
-  ImagePlus, Trash2, CheckCircle2, RefreshCw, Pencil,
+  ImagePlus, Trash2, CheckCircle2, RefreshCw, Pencil, User, UserPlus, History,
 } from "lucide-react";
 import { api } from "./api";
 
@@ -68,6 +68,9 @@ export default function App() {
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
 
+  const [cashierToken, setCashierToken] = useState(() => localStorage.getItem("ekambi_cashier_token") || "");
+  const [cashierName, setCashierName] = useState(() => localStorage.getItem("ekambi_cashier_name") || "");
+
   const refresh = useCallback(async () => {
     try {
       const [p, s] = await Promise.all([api.getProducts(), api.getSales()]);
@@ -104,6 +107,21 @@ export default function App() {
     setView("employee");
   };
 
+  const loginCashier = async (username, password) => {
+    const { token, name } = await api.cashierLogin(username, password);
+    localStorage.setItem("ekambi_cashier_token", token);
+    localStorage.setItem("ekambi_cashier_name", name);
+    setCashierToken(token);
+    setCashierName(name);
+  };
+
+  const logoutCashier = () => {
+    localStorage.removeItem("ekambi_cashier_token");
+    localStorage.removeItem("ekambi_cashier_name");
+    setCashierToken("");
+    setCashierName("");
+  };
+
   return (
     <div className="app-root">
       <header className="topbar no-print">
@@ -116,9 +134,17 @@ export default function App() {
         </div>
         <nav className="role-nav">
           <button className="refresh-btn" title="Refresh data" onClick={refresh}><RefreshCw size={15} /></button>
+          {view === "employee" && cashierToken && (
+            <span className="cashier-badge"><User size={13} /> {cashierName}</span>
+          )}
           <button className={view === "employee" ? "active" : ""} onClick={() => setView("employee")}>
             <ShoppingCart size={15} /> Register
           </button>
+          {view === "employee" && cashierToken && (
+            <button className="logout" title="Log out cashier" onClick={logoutCashier}>
+              <LogOut size={15} />
+            </button>
+          )}
           <button
             className={view === "admin" ? "active" : ""}
             onClick={() => (adminToken ? setView("admin") : setShowPin(true))}
@@ -142,7 +168,13 @@ export default function App() {
         ) : view === "admin" ? (
           <AdminPanel products={products} sales={sales} adminToken={adminToken} onChanged={refresh} onAuthFail={logoutAdmin} />
         ) : (
-          <EmployeePanel products={products} onChanged={refresh} />
+          <EmployeePanel
+            products={products}
+            onChanged={refresh}
+            cashierToken={cashierToken}
+            cashierName={cashierName}
+            loginCashier={loginCashier}
+          />
         )}
       </main>
 
@@ -187,6 +219,12 @@ function AdminPanel({ products, sales, adminToken, onChanged, onAuthFail }) {
         <button className={tab === "inventory" ? "active" : ""} onClick={() => setTab("inventory")}>
           <Boxes size={15} /> Inventory
         </button>
+        <button className={tab === "sales" ? "active" : ""} onClick={() => setTab("sales")}>
+          <History size={15} /> Sales History
+        </button>
+        <button className={tab === "cashiers" ? "active" : ""} onClick={() => setTab("cashiers")}>
+          <UserPlus size={15} /> Cashiers
+        </button>
       </div>
 
       {tab === "dashboard" && <Dashboard products={products} sales={sales} />}
@@ -196,6 +234,172 @@ function AdminPanel({ products, sales, adminToken, onChanged, onAuthFail }) {
       {tab === "inventory" && (
         <Inventory products={products} adminToken={adminToken} onChanged={onChanged} onAuthFail={onAuthFail} />
       )}
+      {tab === "sales" && <SalesHistory sales={sales} />}
+      {tab === "cashiers" && <Cashiers adminToken={adminToken} onAuthFail={onAuthFail} />}
+    </div>
+  );
+}
+
+function SalesHistory({ sales }) {
+  const [q, setQ] = useState("");
+  const [viewing, setViewing] = useState(null);
+
+  const sorted = [...sales].sort((a, b) => b.timestamp - a.timestamp);
+  const filtered = sorted.filter((s) => {
+    const needle = q.toLowerCase();
+    return (
+      s.id.slice(-6).toLowerCase().includes(needle) ||
+      (s.cashierName || "").toLowerCase().includes(needle) ||
+      s.items.some((it) => it.name.toLowerCase().includes(needle))
+    );
+  });
+
+  return (
+    <div>
+      <div className="search-row">
+        <Search size={16} />
+        <input placeholder="Search by ticket #, cashier, or product…" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      {filtered.length === 0 ? (
+        <EmptyNote text={sales.length === 0 ? "No sales recorded yet." : "No sales match that search."} />
+      ) : (
+        <div className="table-wrap">
+          <table className="inv-table">
+            <thead>
+              <tr>
+                <th>Date &amp; time</th><th>Ticket</th><th>Cashier</th><th>Items</th><th>Total</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((s) => {
+                const dt = new Date(s.timestamp);
+                const itemCount = s.items.reduce((n, it) => n + it.qty, 0);
+                return (
+                  <tr key={s.id}>
+                    <td className="mono">{dt.toLocaleDateString()} {dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
+                    <td className="mono">#{s.id.slice(-6).toUpperCase()}</td>
+                    <td>{s.cashierName || <span className="empty-note" style={{ padding: 0 }}>—</span>}</td>
+                    <td className="mono">{itemCount}</td>
+                    <td className="mono">{money(s.total)}</td>
+                    <td>
+                      <button className="icon-btn" title="View / print receipt" onClick={() => setViewing(s)}>
+                        <Printer size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {viewing && <ReceiptModal sale={viewing} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}
+
+function Cashiers({ adminToken, onAuthFail }) {
+  const [cashiers, setCashiers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const list = await api.listCashiers(adminToken);
+      setCashiers(list);
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not load cashiers.");
+    } finally {
+      setLoading(false);
+    }
+  }, [adminToken, onAuthFail]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!name || !username || !password) return;
+    setSaving(true);
+    setError("");
+    try {
+      await api.createCashier({ name: name.trim(), username: username.trim(), password }, adminToken);
+      setName(""); setUsername(""); setPassword("");
+      await load();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not create this cashier account.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (c) => {
+    if (!window.confirm(`Remove cashier "${c.name}" (${c.username})? They won't be able to log in again.`)) return;
+    try {
+      await api.deleteCashier(c.id, adminToken);
+      await load();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not remove this cashier.");
+    }
+  };
+
+  return (
+    <div className="addstock-wrap">
+      <form className="card form-card" onSubmit={submit}>
+        <div className="form-title">Add a cashier</div>
+        <p className="form-hint">Create a login for a staff member. They'll use this to sign into the Register — sales they ring up will show their name on the receipt and in sales history.</p>
+
+        <label className="field">
+          <span>Full name</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Grace Wanjiru" required />
+        </label>
+        <label className="field">
+          <span>Username</span>
+          <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. grace" required />
+        </label>
+        <label className="field">
+          <span>Password</span>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 4 characters" required />
+        </label>
+
+        {error && <div className="pin-error" style={{ marginBottom: 10 }}>{error}</div>}
+
+        <button className="btn btn-primary" type="submit" disabled={saving}>
+          {saving ? "Creating…" : "Create cashier account"}
+        </button>
+      </form>
+
+      <div className="card form-card" style={{ marginTop: 16, maxWidth: 560 }}>
+        <div className="form-title">Cashier accounts</div>
+        {loading ? (
+          <EmptyNote text="Loading…" />
+        ) : cashiers.length === 0 ? (
+          <EmptyNote text="No cashier accounts yet." />
+        ) : (
+          <div className="cashier-list">
+            {cashiers.map((c) => (
+              <div className="cashier-row" key={c.id}>
+                <div className="thumb thumb-empty" style={{ width: 36, height: 36 }}><User size={16} /></div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13.5 }}>{c.name}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--ink-500)" }}>@{c.username}</div>
+                </div>
+                <button className="icon-btn icon-btn-danger" title="Remove" onClick={() => remove(c)}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -637,12 +841,16 @@ function EditProductModal({ product, adminToken, onClose, onSaved, onAuthFail })
 }
 
 // ================= EMPLOYEE =================
-function EmployeePanel({ products, onChanged }) {
+function EmployeePanel({ products, onChanged, cashierToken, cashierName, loginCashier }) {
   const [q, setQ] = useState("");
   const [cart, setCart] = useState([]);
   const [receipt, setReceipt] = useState(null);
   const [checkingOut, setCheckingOut] = useState(false);
   const [error, setError] = useState("");
+
+  if (!cashierToken) {
+    return <CashierLogin loginCashier={loginCashier} />;
+  }
 
   const filtered = products.filter(
     (p) => p.name.toLowerCase().includes(q.toLowerCase()) || p.category.toLowerCase().includes(q.toLowerCase())
@@ -677,7 +885,7 @@ function EmployeePanel({ products, onChanged }) {
     setCheckingOut(true);
     setError("");
     try {
-      const sale = await api.createSale(cart.map((c) => ({ productId: c.productId, qty: c.qty })));
+      const sale = await api.createSale(cart.map((c) => ({ productId: c.productId, qty: c.qty })), cashierToken);
       setReceipt(sale);
       setCart([]);
       await onChanged();
@@ -717,6 +925,7 @@ function EmployeePanel({ products, onChanged }) {
 
       <div className="cart-panel">
         <div className="cart-head"><ShoppingCart size={16} /> Current sale</div>
+        <div className="cart-cashier">Served by {cashierName}</div>
         {cart.length === 0 ? (
           <EmptyNote text="Tap a product to add it to the sale." />
         ) : (
@@ -750,6 +959,53 @@ function EmployeePanel({ products, onChanged }) {
   );
 }
 
+function CashierLogin({ loginCashier }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!username || !password) return;
+    setLoading(true);
+    setError("");
+    try {
+      await loginCashier(username, password);
+    } catch (err) {
+      setError(err.message || "Incorrect username or password.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="cashier-login-wrap">
+      <form className="card form-card" style={{ maxWidth: 340, margin: "40px auto" }} onSubmit={submit}>
+        <div className="form-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <User size={18} /> Cashier sign-in
+        </div>
+        <p className="form-hint">Ask an admin to create your account if you don't have one yet.</p>
+
+        <label className="field">
+          <span>Username</span>
+          <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required />
+        </label>
+        <label className="field">
+          <span>Password</span>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        </label>
+
+        {error && <div className="pin-error" style={{ marginBottom: 10 }}>{error}</div>}
+
+        <button className="btn btn-primary" style={{ width: "100%" }} type="submit" disabled={loading}>
+          {loading ? "Signing in…" : "Sign in"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 function ReceiptModal({ sale, onClose }) {
   const dt = new Date(sale.timestamp);
   return (
@@ -763,6 +1019,7 @@ function ReceiptModal({ sale, onClose }) {
               {dt.toLocaleDateString()} {dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </div>
             <div className="receipt-meta">Ticket #{sale.id.slice(-6).toUpperCase()}</div>
+            {sale.cashierName && <div className="receipt-meta">Served by {sale.cashierName}</div>}
             <div className="receipt-divider" />
             <div className="receipt-lines">
               {sale.items.map((it) => (
