@@ -68,6 +68,10 @@ input{ font-family:inherit; }
 .btn-primary{ background:var(--safety-yellow); color:var(--steel-900); }
 .btn-primary:disabled{ opacity:0.5; cursor:default; }
 .btn-ghost{ background:#fff; border:1px solid var(--concrete-200); color:var(--ink-900); }
+.btn-danger{ background:var(--rust-600); color:#fff; }
+.btn-danger:disabled{ opacity:0.5; cursor:default; }
+.btn-danger-ghost{ color:var(--rust-600); border-color:#F0B79B; white-space:nowrap; }
+.btn-danger-ghost:hover{ background:#FCE4DA; }
 
 .search-row{ display:flex; align-items:center; gap:8px; background:#fff; border:1px solid var(--concrete-200); border-radius:8px; padding:9px 12px; margin-bottom:14px; color:var(--ink-500); }
 .search-row input{ border:none; outline:none; flex:1; font-size:14px; }
