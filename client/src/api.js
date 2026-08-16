@@ -55,6 +55,15 @@ export const api = {
       body: JSON.stringify({ items }),
     }).then(handle),
 
+  deleteSale: (id, token) =>
+    fetch(`/api/sales/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }).then(handle),
+
+  clearSales: (token, paymentMethod) =>
+    fetch(`/api/sales${paymentMethod ? `?paymentMethod=${paymentMethod}` : ""}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(handle),
+
   adminLogin: (pin) =>
     fetch("/api/admin/login", {
       method: "POST",
@@ -95,6 +104,12 @@ export const api = {
       body: JSON.stringify(payload),
     }).then(handle),
 
+  deletePettyCash: (id, token) =>
+    fetch(`/api/pettycash/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }).then(handle),
+
+  clearPettyCash: (token) =>
+    fetch("/api/pettycash", { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }).then(handle),
+
   listBorrows: (token) =>
     fetch("/api/borrows", { headers: { Authorization: `Bearer ${token}` } }).then(handle),
 
@@ -111,4 +126,10 @@ export const api = {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ items }),
     }).then(handle),
+
+  deleteBorrow: (id, token) =>
+    fetch(`/api/borrows/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }).then(handle),
+
+  clearBorrows: (token) =>
+    fetch("/api/borrows", { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }).then(handle),
 };
