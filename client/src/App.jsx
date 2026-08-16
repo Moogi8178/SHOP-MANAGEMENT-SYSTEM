@@ -60,6 +60,47 @@ function EmptyNote({ text }) {
   return <div className="empty-note">{text}</div>;
 }
 
+// Requires typing the confirm word before the destructive action can fire —
+// a stronger guard than window.confirm for irreversible bulk deletes.
+function DangerConfirmModal({ title, message, confirmWord = "DELETE", busy, onCancel, onConfirm }) {
+  const [text, setText] = useState("");
+  const [error, setError] = useState("");
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (text.trim() !== confirmWord) {
+      setError(`Type ${confirmWord} exactly to confirm.`);
+      return;
+    }
+    onConfirm();
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <form className="card form-card" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <div className="form-title" style={{ color: "var(--rust-600)" }}>{title}</div>
+        <p className="form-hint">{message}</p>
+        <label className="field">
+          <span>Type {confirmWord} to confirm</span>
+          <input
+            autoFocus
+            value={text}
+            onChange={(e) => { setText(e.target.value); setError(""); }}
+            placeholder={confirmWord}
+          />
+        </label>
+        {error && <div className="pin-error" style={{ marginBottom: 10 }}>{error}</div>}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</button>
+          <button type="submit" className="btn btn-danger" style={{ flex: 1 }} disabled={busy}>
+            {busy ? "Deleting…" : "Delete permanently"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -266,6 +307,10 @@ function SalesHistory({ sales, adminToken, onChanged, onAuthFail }) {
   const [showAllDates, setShowAllDates] = useState(false);
   const [viewing, setViewing] = useState(null);
   const [returning, setReturning] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [showClearAll, setShowClearAll] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [error, setError] = useState("");
 
   const sorted = [...sales].sort((a, b) => b.timestamp - a.timestamp);
   const dateFiltered = showAllDates ? sorted : sorted.filter((s) => dateKey(s.timestamp) === dateFilter);
@@ -289,6 +334,36 @@ function SalesHistory({ sales, adminToken, onChanged, onAuthFail }) {
 
   const canReturn = (s) => s.items.some((it) => it.qty - (it.returnedQty || 0) > 0);
 
+  const deleteSale = async (s) => {
+    if (!window.confirm(`Permanently delete ticket #${s.id.slice(-6).toUpperCase()}? This removes it from revenue, profit, and all reports.`)) return;
+    setDeletingId(s.id);
+    setError("");
+    try {
+      await api.deleteSale(s.id, adminToken);
+      await onChanged();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not delete this sale.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const clearAll = async () => {
+    setClearing(true);
+    setError("");
+    try {
+      await api.clearSales(adminToken);
+      setShowClearAll(false);
+      await onChanged();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not clear sales history.");
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <div>
       <div className="txn-filter-row">
@@ -303,7 +378,14 @@ function SalesHistory({ sales, adminToken, onChanged, onAuthFail }) {
           <input type="checkbox" checked={showAllDates} onChange={(e) => setShowAllDates(e.target.checked)} />
           <span>All dates</span>
         </label>
+        {sales.length > 0 && (
+          <button type="button" className="btn btn-ghost btn-danger-ghost" onClick={() => setShowClearAll(true)}>
+            <Trash2 size={14} /> Clear all
+          </button>
+        )}
       </div>
+
+      {error && <div className="pin-error" style={{ marginTop: 10 }}>{error}</div>}
 
       <div className="kpi-grid" style={{ marginTop: 14 }}>
         <div className="kpi-card">
@@ -361,6 +443,14 @@ function SalesHistory({ sales, adminToken, onChanged, onAuthFail }) {
                             <RotateCcw size={14} />
                           </button>
                         )}
+                        <button
+                          className="icon-btn icon-btn-danger"
+                          title="Delete permanently"
+                          disabled={deletingId === s.id}
+                          onClick={() => deleteSale(s)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -372,6 +462,15 @@ function SalesHistory({ sales, adminToken, onChanged, onAuthFail }) {
       )}
 
       {viewing && <ReceiptModal sale={viewing} onClose={() => setViewing(null)} />}
+      {showClearAll && (
+        <DangerConfirmModal
+          title="Clear all sales history"
+          message="This permanently deletes every sale on record — receipts, revenue, and profit figures will all reset to zero. This cannot be undone."
+          busy={clearing}
+          onCancel={() => setShowClearAll(false)}
+          onConfirm={clearAll}
+        />
+      )}
       {returning && (
         <ReturnModal
           sale={returning}
@@ -488,6 +587,9 @@ function Debts({ sales, adminToken, onChanged, onAuthFail }) {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("outstanding"); // outstanding | settled | all
   const [settlingId, setSettlingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [showClearAll, setShowClearAll] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [error, setError] = useState("");
   const [viewing, setViewing] = useState(null);
 
@@ -520,6 +622,36 @@ function Debts({ sales, adminToken, onChanged, onAuthFail }) {
     }
   };
 
+  const deleteDebt = async (s) => {
+    if (!window.confirm(`Permanently delete this debt record for ${s.customerName || "this customer"}? This also removes it from Sales History.`)) return;
+    setDeletingId(s.id);
+    setError("");
+    try {
+      await api.deleteSale(s.id, adminToken);
+      await onChanged();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not delete this debt.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const clearAllDebts = async () => {
+    setClearing(true);
+    setError("");
+    try {
+      await api.clearSales(adminToken, "debt");
+      setShowClearAll(false);
+      await onChanged();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not clear debt records.");
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <div>
       <div className="kpi-card kpi-highlight" style={{ marginBottom: 14, maxWidth: 280 }}>
@@ -538,6 +670,11 @@ function Debts({ sales, adminToken, onChanged, onAuthFail }) {
           <button className={statusFilter === "settled" ? "active" : ""} onClick={() => setStatusFilter("settled")}>Settled</button>
           <button className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>All</button>
         </div>
+        {debts.length > 0 && (
+          <button type="button" className="btn btn-ghost btn-danger-ghost" onClick={() => setShowClearAll(true)}>
+            <Trash2 size={14} /> Clear all
+          </button>
+        )}
       </div>
 
       {error && <div className="pin-error" style={{ margin: "10px 0" }}>{error}</div>}
@@ -581,6 +718,14 @@ function Debts({ sales, adminToken, onChanged, onAuthFail }) {
                             <CheckCircle2 size={14} />
                           </button>
                         )}
+                        <button
+                          className="icon-btn icon-btn-danger"
+                          title="Delete permanently"
+                          disabled={deletingId === s.id}
+                          onClick={() => deleteDebt(s)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -592,6 +737,15 @@ function Debts({ sales, adminToken, onChanged, onAuthFail }) {
       )}
 
       {viewing && <ReceiptModal sale={viewing} onClose={() => setViewing(null)} />}
+      {showClearAll && (
+        <DangerConfirmModal
+          title="Clear all debt records"
+          message="This permanently deletes every debt sale — paid and outstanding alike — and removes them from Sales History too. This cannot be undone."
+          busy={clearing}
+          onCancel={() => setShowClearAll(false)}
+          onConfirm={clearAllDebts}
+        />
+      )}
     </div>
   );
 }
@@ -604,6 +758,9 @@ function Borrows({ adminToken, onAuthFail }) {
   const [statusFilter, setStatusFilter] = useState("outstanding"); // outstanding | returned | all
   const [returning, setReturning] = useState(null);
   const [viewingSlip, setViewingSlip] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [showClearAll, setShowClearAll] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -635,6 +792,36 @@ function Borrows({ adminToken, onAuthFail }) {
 
   const outstandingCount = borrows.filter((b) => !b.returned).length;
 
+  const deleteBorrow = async (b) => {
+    if (!window.confirm(`Permanently delete this borrow record for ${b.customerName || "this customer"}?`)) return;
+    setDeletingId(b.id);
+    setError("");
+    try {
+      await api.deleteBorrow(b.id, adminToken);
+      await load();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not delete this borrow record.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const clearAll = async () => {
+    setClearing(true);
+    setError("");
+    try {
+      await api.clearBorrows(adminToken);
+      setShowClearAll(false);
+      await load();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not clear borrow records.");
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <div>
       <div className="kpi-card kpi-highlight" style={{ marginBottom: 14, maxWidth: 280 }}>
@@ -653,6 +840,11 @@ function Borrows({ adminToken, onAuthFail }) {
           <button className={statusFilter === "returned" ? "active" : ""} onClick={() => setStatusFilter("returned")}>Returned</button>
           <button className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>All</button>
         </div>
+        {borrows.length > 0 && (
+          <button type="button" className="btn btn-ghost btn-danger-ghost" onClick={() => setShowClearAll(true)}>
+            <Trash2 size={14} /> Clear all
+          </button>
+        )}
       </div>
 
       {error && <div className="pin-error" style={{ margin: "10px 0" }}>{error}</div>}
@@ -692,6 +884,14 @@ function Borrows({ adminToken, onAuthFail }) {
                             <RotateCcw size={14} />
                           </button>
                         )}
+                        <button
+                          className="icon-btn icon-btn-danger"
+                          title="Delete permanently"
+                          disabled={deletingId === b.id}
+                          onClick={() => deleteBorrow(b)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -703,6 +903,15 @@ function Borrows({ adminToken, onAuthFail }) {
       )}
 
       {viewingSlip && <BorrowSlipModal borrow={viewingSlip} onClose={() => setViewingSlip(null)} />}
+      {showClearAll && (
+        <DangerConfirmModal
+          title="Clear all borrow records"
+          message="This permanently deletes every borrow record, returned and outstanding alike. It does not adjust current stock counts. This cannot be undone."
+          busy={clearing}
+          onCancel={() => setShowClearAll(false)}
+          onConfirm={clearAll}
+        />
+      )}
       {returning && (
         <BorrowReturnModal
           borrow={returning}
@@ -1112,6 +1321,9 @@ function PettyCash({ adminToken, onAuthFail }) {
   const [error, setError] = useState("");
   const [dateFilter, setDateFilter] = useState(todayKey());
   const [showAllDates, setShowAllDates] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const [showClearAll, setShowClearAll] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -1132,6 +1344,36 @@ function PettyCash({ adminToken, onAuthFail }) {
     .sort((a, b) => b.timestamp - a.timestamp);
   const total = filtered.reduce((n, e) => n + e.amount, 0);
 
+  const deleteEntry = async (e) => {
+    if (!window.confirm(`Delete this ${money(e.amount)} petty cash entry?`)) return;
+    setDeletingId(e.id);
+    setError("");
+    try {
+      await api.deletePettyCash(e.id, adminToken);
+      await load();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not delete this entry.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const clearAll = async () => {
+    setClearing(true);
+    setError("");
+    try {
+      await api.clearPettyCash(adminToken);
+      setShowClearAll(false);
+      await load();
+    } catch (err) {
+      if (String(err.message).toLowerCase().includes("login")) onAuthFail();
+      setError(err.message || "Could not clear petty cash records.");
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <div>
       <div className="txn-filter-row">
@@ -1143,6 +1385,11 @@ function PettyCash({ adminToken, onAuthFail }) {
           <span>All dates</span>
         </label>
         <button className="icon-btn" title="Refresh" onClick={load}><RefreshCw size={14} /></button>
+        {entries.length > 0 && (
+          <button type="button" className="btn btn-ghost btn-danger-ghost" onClick={() => setShowClearAll(true)}>
+            <Trash2 size={14} /> Clear all
+          </button>
+        )}
       </div>
 
       <div className="kpi-card kpi-highlight" style={{ marginTop: 14, marginBottom: 14, maxWidth: 280 }}>
@@ -1161,7 +1408,7 @@ function PettyCash({ adminToken, onAuthFail }) {
         <div className="table-wrap">
           <table className="inv-table">
             <thead>
-              <tr><th>Date &amp; time</th><th>Amount</th><th>Used for</th><th>Issued by</th></tr>
+              <tr><th>Date &amp; time</th><th>Amount</th><th>Used for</th><th>Issued by</th><th></th></tr>
             </thead>
             <tbody>
               {filtered.map((e) => {
@@ -1172,12 +1419,31 @@ function PettyCash({ adminToken, onAuthFail }) {
                     <td className="mono">{money(e.amount)}</td>
                     <td>{e.reason}</td>
                     <td>{e.cashierName}</td>
+                    <td>
+                      <button
+                        className="icon-btn icon-btn-danger"
+                        title="Delete permanently"
+                        disabled={deletingId === e.id}
+                        onClick={() => deleteEntry(e)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
+      )}
+      {showClearAll && (
+        <DangerConfirmModal
+          title="Clear all petty cash"
+          message="This permanently deletes every petty cash entry on record. This cannot be undone."
+          busy={clearing}
+          onCancel={() => setShowClearAll(false)}
+          onConfirm={clearAll}
+        />
       )}
     </div>
   );
