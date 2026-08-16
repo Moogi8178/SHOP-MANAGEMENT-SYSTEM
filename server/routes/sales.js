@@ -220,4 +220,27 @@ router.patch("/:id/return", requireAdmin, async (req, res) => {
   }
 });
 
+// Admin: permanently delete a single sale record (does not adjust stock —
+// use the return flow first if items need to go back into inventory).
+router.delete("/:id", requireAdmin, async (req, res) => {
+  const { rowCount } = await pool.query("DELETE FROM sales WHERE id = $1", [req.params.id]);
+  if (rowCount === 0) return res.status(404).json({ error: "Sale not found." });
+  res.json({ ok: true });
+});
+
+// Admin: bulk-delete sales history. Optional ?paymentMethod=debt|cash|till
+// scopes the wipe (e.g. clearing only debt records) instead of everything.
+router.delete("/", requireAdmin, async (req, res) => {
+  const { paymentMethod } = req.query;
+  if (paymentMethod) {
+    if (!PAYMENT_METHODS.includes(paymentMethod)) {
+      return res.status(400).json({ error: "Invalid payment method filter." });
+    }
+    const { rowCount } = await pool.query("DELETE FROM sales WHERE payment_method = $1", [paymentMethod]);
+    return res.json({ ok: true, deleted: rowCount });
+  }
+  const { rowCount } = await pool.query("DELETE FROM sales");
+  res.json({ ok: true, deleted: rowCount });
+});
+
 module.exports = router;
