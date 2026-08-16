@@ -42,4 +42,17 @@ router.post("/", requireCashierOrAdmin, async (req, res) => {
   res.status(201).json(rowToEntry(rows[0]));
 });
 
+// Admin: delete a single petty cash entry.
+router.delete("/:id", requireAdmin, async (req, res) => {
+  const { rowCount } = await pool.query("DELETE FROM petty_cash WHERE id = $1", [req.params.id]);
+  if (rowCount === 0) return res.status(404).json({ error: "Entry not found." });
+  res.json({ ok: true });
+});
+
+// Admin: bulk-delete all petty cash entries.
+router.delete("/", requireAdmin, async (_req, res) => {
+  const { rowCount } = await pool.query("DELETE FROM petty_cash");
+  res.json({ ok: true, deleted: rowCount });
+});
+
 module.exports = router;
