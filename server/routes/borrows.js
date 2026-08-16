@@ -174,4 +174,17 @@ router.patch("/:id/return", requireAdmin, async (req, res) => {
   }
 });
 
+// Admin: delete a single borrow record permanently.
+router.delete("/:id", requireAdmin, async (req, res) => {
+  const { rowCount } = await pool.query("DELETE FROM borrows WHERE id = $1", [req.params.id]);
+  if (rowCount === 0) return res.status(404).json({ error: "Borrow record not found." });
+  res.json({ ok: true });
+});
+
+// Admin: bulk-delete all borrow records.
+router.delete("/", requireAdmin, async (_req, res) => {
+  const { rowCount } = await pool.query("DELETE FROM borrows");
+  res.json({ ok: true, deleted: rowCount });
+});
+
 module.exports = router;
